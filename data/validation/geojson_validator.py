@@ -16,9 +16,12 @@ def validate_geojson(geojson_path):
     try:
         with open(geojson_path, 'r') as f:
             data = json.load(f)
-            # Additional validation logic for GeoJSON can be added here
-        print(f"GeoJSON file {geojson_path} is valid.")
-        return True
+            # Basic GeoJSON structure validation
+            if "type" in data and data["type"] == "FeatureCollection":
+                print(f"GeoJSON file {geojson_path} is valid.")
+                return True
+            else:
+                raise ValueError("Invalid GeoJSON structure.")
     except Exception as e:
         print(f"Invalid GeoJSON file {geojson_path}: {e}")
         return False

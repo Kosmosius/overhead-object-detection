@@ -1,0 +1,74 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Model Training Dashboard",
+    "timezone": "browser",
+    "panels": [
+      {
+        "type": "graph",
+        "title": "Training Loss",
+        "targets": [
+          {
+            "expr": "training_loss",
+            "legendFormat": "Training Loss",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "xaxis": {
+          "show": true
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "show": true
+          }
+        ]
+      },
+      {
+        "type": "graph",
+        "title": "Validation Precision",
+        "targets": [
+          {
+            "expr": "validation_precision",
+            "legendFormat": "Validation Precision",
+            "refId": "B"
+          }
+        ],
+        "datasource": "Prometheus",
+        "xaxis": {
+          "show": true
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "show": true
+          }
+        ]
+      },
+      {
+        "type": "graph",
+        "title": "Validation Recall",
+        "targets": [
+          {
+            "expr": "validation_recall",
+            "legendFormat": "Validation Recall",
+            "refId": "C"
+          }
+        ],
+        "datasource": "Prometheus",
+        "xaxis": {
+          "show": true
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "show": true
+          }
+        ]
+      }
+    ],
+    "schemaVersion": 16,
+    "version": 1
+  }
+}

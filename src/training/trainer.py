@@ -4,17 +4,33 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import DetrFeatureExtractor
 from src.models.foundation_model import DetrObjectDetectionModel
-from src.evaluation.metrics.py import evaluate_model
+from src.evaluation.metrics import evaluate_model
 from torchvision.datasets import CocoDetection
 from transformers import AdamW
 import os
+import logging
 
-def train(model, dataloader, optimizer, num_epochs=10, device='cuda'):
+def setup_logging(log_file="training.log"):
+    """
+    Set up logging to a file and the console.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+
+def train(model, dataloader, optimizer, num_epochs=10, device='cuda', checkpoint_dir="checkpoints"):
     model.train()
     model.to(device)
 
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
     for epoch in range(num_epochs):
-        print(f"Epoch {epoch + 1}/{num_epochs}")
+        logging.info(f"Epoch {epoch + 1}/{num_epochs}")
         running_loss = 0.0
 
         for i, (images, targets) in enumerate(dataloader):
@@ -34,11 +50,17 @@ def train(model, dataloader, optimizer, num_epochs=10, device='cuda'):
 
             running_loss += loss.item()
             if i % 10 == 0:
-                print(f"  Batch {i}, Loss: {loss.item()}")
+                logging.info(f"  Batch {i}, Loss: {loss.item()}")
 
-        print(f"  Epoch Loss: {running_loss / len(dataloader)}")
-    
-    print("Training complete.")
+        epoch_loss = running_loss / len(dataloader)
+        logging.info(f"  Epoch Loss: {epoch_loss}")
+
+        # Save checkpoint
+        checkpoint_path = os.path.join(checkpoint_dir, f"detr_epoch_{epoch+1}.pt")
+        torch.save(model.model.state_dict(), checkpoint_path)
+        logging.info(f"Model checkpoint saved at {checkpoint_path}")
+
+    logging.info("Training complete.")
 
 if __name__ == "__main__":
     # Define constants
@@ -48,6 +70,10 @@ if __name__ == "__main__":
     NUM_EPOCHS = 5
     LEARNING_RATE = 5e-5
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    CHECKPOINT_DIR = "output/checkpoints"
+
+    # Set up logging
+    setup_logging()
 
     # Initialize the feature extractor, model, optimizer, and dataset
     feature_extractor = DetrFeatureExtractor.from_pretrained("facebook/detr-resnet-50")
@@ -66,11 +92,12 @@ if __name__ == "__main__":
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=lambda x: tuple(zip(*x)))
 
     # Train the model
-    train(model, train_loader, optimizer, num_epochs=NUM_EPOCHS, device=DEVICE)
+    train(model, train_loader, optimizer, num_epochs=NUM_EPOCHS, device=DEVICE, checkpoint_dir=CHECKPOINT_DIR)
     
     # Evaluate the model
     precision, recall = evaluate_model(model, val_loader, device=DEVICE)
-    print(f"Validation Precision: {precision}, Recall: {recall}")
+    logging.info(f"Validation Precision: {precision}, Recall: {recall}")
 
-    # Save the trained model
+    # Save the final trained model
     model.save("output/detr_model")
+    logging.info("Final model saved.")

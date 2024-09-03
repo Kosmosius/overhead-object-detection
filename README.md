@@ -119,11 +119,10 @@ rare-objects-ultimatum/
 │   │   └── peft_utils.py               # Utility functions for PEFT fine-tuning
 │   ├── foundation                      # Foundation models used as the base for fine-tuning
 │   │   └── foundation_model.py         # Implementation of the foundation model
-│   ├── heads                           # Modular heads for different tasks (e.g., classification, detection)
-│   │   ├── classification_head.py      # Head for classification tasks
-│   │   ├── detection_head.py           # Head for object detection tasks
-│   │   └── segmentation_head.py        # Head for segmentation tasks
-│   └── model_registry.py               # Registry for managing and tracking models
+│   └── heads                           # Modular heads for different tasks (e.g., classification, detection)
+│       ├── classification_head.py      # Head for classification tasks
+│       ├── detection_head.py           # Head for object detection tasks
+│       └── segmentation_head.py        # Head for segmentation tasks
 ├── notebooks                           # Jupyter notebooks for exploration and experimentation
 │   ├── data_exploration.ipynb          # Notebook for exploring datasets
 │   ├── experiment_notebook.ipynb       # Notebook for running and documenting experiments

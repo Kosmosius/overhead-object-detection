@@ -1,0 +1,9 @@
+# configs/monitoring/prometheus.yml
+
+global:
+  scrape_interval: 15s # How often to scrape targets
+
+scrape_configs:
+  - job_name: 'model_training'
+    static_configs:
+      - targets: ['localhost:8000'] # Replace with the appropriate target address

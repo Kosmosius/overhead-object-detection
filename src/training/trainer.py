@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import DetrFeatureExtractor
 from src.models.foundation_model import DetrObjectDetectionModel
+from src.evaluation.metrics.py import evaluate_model
 from torchvision.datasets import CocoDetection
 from transformers import AdamW
 import os
@@ -59,8 +60,17 @@ if __name__ == "__main__":
                                   transform=lambda x: x)  # Placeholder transform
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=lambda x: tuple(zip(*x)))
 
+    val_dataset = CocoDetection(root=os.path.join(DATA_DIR, 'val2017'),
+                                annFile=os.path.join(DATA_DIR, 'annotations/instances_val2017.json'),
+                                transform=lambda x: x)  # Placeholder transform
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=lambda x: tuple(zip(*x)))
+
     # Train the model
     train(model, train_loader, optimizer, num_epochs=NUM_EPOCHS, device=DEVICE)
     
+    # Evaluate the model
+    precision, recall = evaluate_model(model, val_loader, device=DEVICE)
+    print(f"Validation Precision: {precision}, Recall: {recall}")
+
     # Save the trained model
     model.save("output/detr_model")

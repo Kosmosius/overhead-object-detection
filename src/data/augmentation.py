@@ -1,8 +1,7 @@
-# src/data/augmentation.py
-
 import random
 from PIL import Image, ImageOps, ImageEnhance
 import torchvision.transforms as T
+import torch
 
 class DataAugmentor:
     """
@@ -17,13 +16,13 @@ class DataAugmentor:
     def geometric_transforms(self, image):
         """
         Apply random geometric transformations to the image.
+
         Args:
-            image (PIL.Image): The input image.
+            image (PIL.Image or torch.Tensor): The input image.
 
         Returns:
-            PIL.Image: Transformed image.
+            PIL.Image or torch.Tensor: Transformed image.
         """
-        # Define random geometric transforms (rotation, flipping, resizing, etc.)
         transforms = []
 
         # Random horizontal flip with a probability of 50%
@@ -40,34 +39,40 @@ class DataAugmentor:
             size = random.uniform(0.8, 1.2)  # Scale between 80% and 120%
             transforms.append(T.Resize(int(image.size[1] * size)))
 
-        # Apply the transformations sequentially
+        # Apply the transformations
         transform_pipeline = T.Compose(transforms)
         return transform_pipeline(image)
 
     def photometric_transforms(self, image):
         """
         Apply random photometric transformations to the image.
+
         Args:
-            image (PIL.Image): The input image.
+            image (PIL.Image or torch.Tensor): The input image.
 
         Returns:
-            PIL.Image: Transformed image.
+            PIL.Image or torch.Tensor: Transformed image.
         """
-        # Define random photometric transformations (brightness, contrast, saturation, etc.)
-        if random.random() > 0.5:
-            enhancer = ImageEnhance.Brightness(image)
-            factor = random.uniform(0.7, 1.3)  # Adjust brightness
-            image = enhancer.enhance(factor)
+        if isinstance(image, Image.Image):
+            # PIL-based photometric transforms
+            if random.random() > 0.5:
+                enhancer = ImageEnhance.Brightness(image)
+                factor = random.uniform(0.7, 1.3)  # Adjust brightness
+                image = enhancer.enhance(factor)
 
-        if random.random() > 0.5:
-            enhancer = ImageEnhance.Contrast(image)
-            factor = random.uniform(0.7, 1.3)  # Adjust contrast
-            image = enhancer.enhance(factor)
+            if random.random() > 0.5:
+                enhancer = ImageEnhance.Contrast(image)
+                factor = random.uniform(0.7, 1.3)  # Adjust contrast
+                image = enhancer.enhance(factor)
 
-        if random.random() > 0.5:
-            enhancer = ImageEnhance.Saturation(image)
-            factor = random.uniform(0.7, 1.3)  # Adjust saturation
-            image = enhancer.enhance(factor)
+            if random.random() > 0.5:
+                enhancer = ImageEnhance.Saturation(image)
+                factor = random.uniform(0.7, 1.3)  # Adjust saturation
+                image = enhancer.enhance(factor)
+        else:
+            # Tensor-based photometric transforms (for future support of Vision Transformers, etc.)
+            if random.random() > 0.5:
+                image = T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3)(image)
 
         return image
 
@@ -76,16 +81,14 @@ class DataAugmentor:
         Apply augmentation to the image using geometric and photometric transformations.
 
         Args:
-            image (PIL.Image): The input image.
+            image (PIL.Image or torch.Tensor): The input image.
 
         Returns:
-            PIL.Image: Augmented image.
+            PIL.Image or torch.Tensor: Augmented image.
         """
-        # Apply geometric transforms
         if self.apply_geometric:
             image = self.geometric_transforms(image)
 
-        # Apply photometric transforms
         if self.apply_photometric:
             image = self.photometric_transforms(image)
 

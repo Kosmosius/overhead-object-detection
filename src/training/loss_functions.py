@@ -4,59 +4,58 @@ import torch
 import torch.nn as nn
 from transformers import DetrForObjectDetection
 
-class DetrLossFunction(nn.Module):
+class CustomLossFunction(nn.Module):
     """
-    Custom loss function for DETR (DEtection TRansformers).
-    This loss function combines classification loss and bounding box regression loss.
-
+    Generalized loss function for object detection tasks.
+    Supports DETR and other models with configurable components.
+    
     Args:
-        model (DetrForObjectDetection): The DETR model that outputs logits and bounding boxes.
+        model (nn.Module): The model that outputs logits and bounding boxes.
         class_weight (float): Weight for classification loss.
         bbox_weight (float): Weight for bounding box regression loss.
-        giou_weight (float): Weight for Generalized IoU (GIoU) loss.
+        giou_weight (float): Weight for GIoU loss.
     """
-    def __init__(self, model: DetrForObjectDetection, class_weight: float = 1.0, bbox_weight: float = 1.0, giou_weight: float = 1.0):
-        super(DetrLossFunction, self).__init__()
+    def __init__(self, model, class_weight: float = 1.0, bbox_weight: float = 1.0, giou_weight: float = 1.0):
+        super(CustomLossFunction, self).__init__()
         self.model = model
         self.class_weight = class_weight
         self.bbox_weight = bbox_weight
         self.giou_weight = giou_weight
 
-        # Cross-entropy for classification loss
+        # Define classification loss
         self.classification_loss_fn = nn.CrossEntropyLoss()
 
-        # L1 loss for bounding box regression
+        # Bounding box regression loss (L1 loss)
         self.bbox_loss_fn = nn.L1Loss()
 
-        # GIoU loss for bounding boxes
-        self.giou_loss_fn = nn.SmoothL1Loss()  # You could use GIoU from torchvision if needed
+        # GIoU loss (optionally switch to IoU, DIoU, or CIoU)
+        self.giou_loss_fn = nn.SmoothL1Loss()  # Replace with a better GIoU loss if needed
 
     def forward(self, outputs, targets):
         """
-        Compute the combined loss for DETR model outputs.
+        Compute the combined loss for object detection models.
 
         Args:
-            outputs (dict): Dictionary containing model outputs (logits and bounding boxes).
-            targets (list): List of dictionaries containing target bounding boxes and class labels.
+            outputs (dict): Model outputs (logits, bounding boxes).
+            targets (list): Target bounding boxes and class labels.
 
         Returns:
-            dict: A dictionary containing the total loss and individual components (classification, bbox, giou).
+            dict: Dictionary containing total loss and individual loss components.
         """
         pred_logits = outputs.logits
         pred_boxes = outputs.pred_boxes
 
-        # Classification targets and loss
+        # Classification loss
         target_labels = torch.cat([t['labels'] for t in targets]).to(pred_logits.device)
         classification_loss = self.classification_loss_fn(pred_logits, target_labels)
 
-        # Bounding box regression targets and loss
+        # Bounding box regression loss
         target_boxes = torch.cat([t['boxes'] for t in targets]).to(pred_boxes.device)
         bbox_loss = self.bbox_loss_fn(pred_boxes, target_boxes)
 
-        # Generalized IoU loss
-        giou_loss = self.giou_loss_fn(pred_boxes, target_boxes)  # Optionally replace with a proper GIoU implementation
+        # GIoU loss
+        giou_loss = self.giou_loss_fn(pred_boxes, target_boxes)  # You can add GIoU here if preferred
 
-        # Total loss
         total_loss = (self.class_weight * classification_loss) + (self.bbox_weight * bbox_loss) + (self.giou_weight * giou_loss)
 
         return {
@@ -66,17 +65,21 @@ class DetrLossFunction(nn.Module):
             "giou_loss": giou_loss
         }
 
-def get_loss_function(model: DetrForObjectDetection, class_weight: float = 1.0, bbox_weight: float = 1.0, giou_weight: float = 1.0):
+def get_loss_function(model, loss_type="custom", class_weight: float = 1.0, bbox_weight: float = 1.0, giou_weight: float = 1.0):
     """
-    Get a custom loss function for the DETR model.
+    Retrieve the appropriate loss function based on the loss type.
 
     Args:
-        model (DetrForObjectDetection): The DETR model to use for loss computation.
+        model (nn.Module): The model for which to compute the loss.
+        loss_type (str): Type of loss function ('custom' for now).
         class_weight (float): Weight for the classification loss.
         bbox_weight (float): Weight for the bounding box regression loss.
         giou_weight (float): Weight for the GIoU loss.
 
     Returns:
-        DetrLossFunction: An instance of the custom DETR loss function.
+        nn.Module: The loss function to use.
     """
-    return DetrLossFunction(model, class_weight, bbox_weight, giou_weight)
+    if loss_type == "custom":
+        return CustomLossFunction(model, class_weight, bbox_weight, giou_weight)
+    else:
+        raise ValueError(f"Loss type {loss_type} is not supported.")

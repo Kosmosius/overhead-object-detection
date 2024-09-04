@@ -1,30 +1,30 @@
 # src/evaluation/evaluator.py
 
 import torch
-from transformers import DetrForObjectDetection
 from src.evaluation.metrics import compute_map
 
 class Evaluator:
-    def __init__(self, model: DetrForObjectDetection, device: str = 'cuda'):
+    def __init__(self, model, device: str = 'cuda'):
         """
         Initialize the evaluator with the model and device.
 
         Args:
-            model (DetrForObjectDetection): Pretrained DETR model for evaluation.
-            device (str): Device to run the evaluation on, either 'cuda' or 'cpu'.
+            model: HuggingFace object detection model (e.g., DETR, YOLO).
+            device (str): Device to run the evaluation on.
         """
         self.model = model.to(device)
         self.device = device
 
-    def evaluate(self, dataloader):
+    def evaluate(self, dataloader, iou_thresholds=[0.5]):
         """
-        Run evaluation on the provided dataloader and compute the precision and recall.
+        Evaluate the model on the provided dataloader and compute precision, recall, and mAP.
 
         Args:
             dataloader (torch.utils.data.DataLoader): Dataloader with validation or test data.
+            iou_thresholds (list): IoU thresholds for mAP calculation.
 
         Returns:
-            tuple: Precision and recall metrics.
+            dict: Computed precision, recall, F1-score, and mAP.
         """
         self.model.eval()
         all_predictions = []
@@ -35,13 +35,12 @@ class Evaluator:
                 pixel_values = torch.stack(images).to(self.device)
                 outputs = self.model(pixel_values=pixel_values)
 
-                # Extract predictions and convert to CPU
+                pred_boxes = outputs.pred_boxes.cpu()
                 logits = outputs.logits.cpu()
-                boxes = outputs.pred_boxes.cpu()
 
                 for i in range(len(images)):
                     pred = {
-                        'boxes': boxes[i],
+                        'boxes': pred_boxes[i],
                         'scores': logits[i]
                     }
                     gt = {
@@ -51,20 +50,25 @@ class Evaluator:
                     all_predictions.append(pred)
                     all_ground_truths.append(gt)
 
-        # Compute precision and recall using custom mAP calculation
-        precision, recall = compute_map(all_predictions, all_ground_truths)
-        return precision, recall
+        metrics = compute_map(all_predictions, all_ground_truths, iou_thresholds)
+        return metrics
 
-    def save_metrics(self, precision: float, recall: float, output_path: str):
+    def save_metrics(self, metrics: dict, output_path: str, output_format='txt'):
         """
         Save the evaluation metrics to a file.
 
         Args:
-            precision (float): Computed precision.
-            recall (float): Computed recall.
+            metrics (dict): Computed metrics to save.
             output_path (str): Path to save the metrics file.
+            output_format (str): Format of the output file ('txt' or 'json').
         """
-        with open(output_path, 'w') as f:
-            f.write(f"Precision: {precision}\n")
-            f.write(f"Recall: {recall}\n")
+        if output_format == 'json':
+            import json
+            with open(output_path, 'w') as f:
+                json.dump(metrics, f, indent=4)
+        else:
+            with open(output_path, 'w') as f:
+                for metric, value in metrics.items():
+                    f.write(f"{metric}: {value}\n")
+
         print(f"Evaluation metrics saved to {output_path}")

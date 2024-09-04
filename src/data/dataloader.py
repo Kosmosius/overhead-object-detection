@@ -51,12 +51,14 @@ def get_dataloader(data_dir, batch_size, mode='train', feature_extractor=None):
     ann_file = f'annotations/instances_{mode}2017.json'
     img_dir = f'{mode}2017'
 
-    # Use the custom CocoDataset to handle images and annotations
-    dataset = CocoDataset(
-        root=f"{data_dir}/{img_dir}",
-        annFile=f"{data_dir}/{ann_file}",
-        transform=lambda x: feature_extractor(images=x, return_tensors="pt").pixel_values[0] if feature_extractor else x
-    )
+    # Dynamically determine dataset class (supporting COCO and others)
+    if dataset_type == 'coco':
+        dataset = CocoDataset(
+            root=f"{data_dir}/{img_dir}",
+            annFile=f"{data_dir}/{ann_file}",
+            transform=lambda x: feature_extractor(images=x, return_tensors="pt").pixel_values[0] if feature_extractor else x
+        )
+    # Extend for future datasets...
 
     # Use the DataCollator to handle padding for batch inputs
     data_collator = DataCollator(feature_extractor=feature_extractor)

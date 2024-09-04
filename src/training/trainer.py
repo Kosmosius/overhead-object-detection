@@ -6,13 +6,15 @@ from transformers import DetrFeatureExtractor, AdamW, get_scheduler
 from src.models.foundation_model import DetrObjectDetectionModel
 from src.evaluation.evaluator import evaluate_model
 from src.training.loss_functions import compute_loss
-from datasets import load_dataset
+from src.training.peft_finetune import setup_peft_model, prepare_dataloader
 import os
 import logging
+from peft import PeftConfig
 
 def setup_logging(log_file="training.log"):
     """
     Set up logging to a file and the console.
+    !Check for compatibility with `src/utils/logging.py`.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -25,17 +27,16 @@ def setup_logging(log_file="training.log"):
 
 def train(model, dataloader, optimizer, scheduler, num_epochs=10, device='cuda', checkpoint_dir="checkpoints"):
     """
-    Train the DETR object detection model.
+    Train the object detection model (supports PEFT).
 
     Args:
-        model (DetrObjectDetectionModel): The object detection model to train.
+        model (PeftModel/DetrObjectDetectionModel): The object detection model to train.
         dataloader (DataLoader): The training DataLoader.
         optimizer (torch.optim.Optimizer): Optimizer for model parameters.
         scheduler (torch.optim.lr_scheduler): Learning rate scheduler.
         num_epochs (int): Number of training epochs.
         device (str): The device to use for training ('cuda' or 'cpu').
         checkpoint_dir (str): Directory to save model checkpoints.
-
     """
     model.train()
     model.to(device)
@@ -86,28 +87,29 @@ if __name__ == "__main__":
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     CHECKPOINT_DIR = "output/checkpoints"
 
+    # PEFT Configuration
+    peft_config = PeftConfig.from_pretrained("facebook/detr-resnet-50")
+
     # Set up logging
     setup_logging()
 
     # Initialize feature extractor, model, optimizer, and scheduler
     feature_extractor = DetrFeatureExtractor.from_pretrained("facebook/detr-resnet-50")
-    model = DetrObjectDetectionModel(num_classes=NUM_CLASSES)
+    model = setup_peft_model("facebook/detr-resnet-50", num_classes=NUM_CLASSES, peft_config=peft_config)
     optimizer = AdamW(model.parameters(), lr=LEARNING_RATE)
+    
+    # Prepare the scheduler with the correct number of steps
+    train_loader = prepare_dataloader(DATA_DIR, BATCH_SIZE, feature_extractor, mode="train")
     scheduler = get_scheduler(name="linear", optimizer=optimizer, num_warmup_steps=0, num_training_steps=NUM_EPOCHS * len(train_loader))
-
-    # Load COCO dataset and dataloader using HuggingFace's `datasets` library
-    dataset = load_dataset(DATASET_NAME)
-    dataset.set_format(type='torch', columns=['pixel_values', 'labels'])
-    train_loader = DataLoader(dataset['train'], batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(dataset['validation'], batch_size=BATCH_SIZE)
 
     # Train the model
     train(model, train_loader, optimizer, scheduler, num_epochs=NUM_EPOCHS, device=DEVICE, checkpoint_dir=CHECKPOINT_DIR)
     
-    # Evaluate the model
+    # Load validation dataloader and evaluate the model
+    val_loader = prepare_dataloader(DATA_DIR, BATCH_SIZE, feature_extractor, mode="val")
     precision, recall = evaluate_model(model, val_loader, device=DEVICE)
     logging.info(f"Validation Precision: {precision}, Recall: {recall}")
 
     # Save the final trained model
-    model.save("output/detr_model")
+    model.save_pretrained("output/detr_model")
     logging.info("Final model saved.")

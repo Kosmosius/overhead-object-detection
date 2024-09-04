@@ -118,7 +118,6 @@ rare-objects-ultimatum/
 │   │   ├── peft_training.py            # Training script for PEFT models
 │   │   └── peft_utils.py               # Utility functions for PEFT fine-tuning
 │   ├── foundation                      # Foundation models used as the base for fine-tuning
-│   │   └── foundation_model.py         # Implementation of the foundation model
 │   └── heads                           # Modular heads for different tasks (e.g., classification, detection)
 │       ├── classification_head.py      # Head for classification tasks
 │       ├── detection_head.py           # Head for object detection tasks
@@ -159,6 +158,7 @@ rare-objects-ultimatum/
 │   │   └── metrics.py                  # Custom metrics for evaluation
 │   ├── models                          # Core model-building and handling modules
 │   │   ├── __init__.py                 # Initialize the models module
+│   │   ├── foundation_model.py         # Implementation of the foundation model
 │   │   ├── model_builder.py            # Utilities for building models from configurations
 │   │   ├── model_registry.py           # Registry for managing model versions and configurations
 │   │   └── peft_finetune.py            # PEFT-specific fine-tuning utilities

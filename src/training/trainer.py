@@ -111,5 +111,5 @@ if __name__ == "__main__":
     logging.info(f"Validation Precision: {precision}, Recall: {recall}")
 
     # Save the final trained model
-    model.save_pretrained("output/detr_model")
+    model.save_pretrained("output/detr_model") #MA dynamically determine model name or use user input
     logging.info("Final model saved.")

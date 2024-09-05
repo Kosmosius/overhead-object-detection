@@ -177,13 +177,54 @@ rare-objects-ultimatum/
 │       ├── metrics.py                  # Metrics calculations and utilities
 │       └── system_utils.py             # System-level utilities (e.g., environment checks)
 └── tests                               # Unit and integration tests for the project
-    ├── test_data.py                    # Tests for data handling modules
-    ├── test_deployment.py              # Tests for deployment scripts and configurations
-    ├── test_integration.py             # Integration tests for the whole system
-    ├── test_models.py                  # Tests for model-related code
-    ├── test_scripts.py                 # Tests for utility scripts
-    ├── test_training.py                # Tests for training modules
-    └── test_utils.py                   # Tests for utility functions
+    ├── unit/                           # Unit tests
+    │   ├── data/
+    │   │   ├── test_preprocess_data.py
+    │   │   └── test_augmentation.py
+    │   ├── datasets/
+    │   │   ├── test_coco_dataset.py
+    │   │   ├── test_geojson_dataset.py
+    │   │   └── test_xview_dataset.py
+    │   ├── models/
+    │   │   ├── test_detr_model.py
+    │   │   ├── test_retinanet_model.py
+    │   │   └── test_mask_rcnn_model.py
+    │   ├── scripts/
+    │   │   └── test_clean_data.py
+    │   ├── training/
+    │   │   └── test_hyperparam_optimization.py
+    │   └── utils/
+    │       └── test_utils.py
+    ├── integration/                              # Integration tests
+    │   ├── test_training_pipeline.py             # Integration tests for training workflow
+    │   ├── test_evaluation.py                    # Integration tests for evaluation workflow
+    │   └── test_inference_integration.py         # Integration tests for inference across various models
+    ├── functional/                               # Functional tests
+    │   ├── test_cloud_deployment.py              # Functional tests for cloud deployment
+    │   └── test_model_monitoring.py              # Functional tests for model monitoring (Prometheus)
+    ├── performance/                              # Performance tests
+    │   ├── test_scalability.py                   # Scalability tests (e.g., large datasets, distributed training)
+    │   └── test_inference_speed.py               # Tests for inference speed and memory usage
+    ├── stress/                                   # Stress and edge-case tests
+    │   └── test_large_datasets.py                # Stress test for large datasets (e.g., 1GB+ images)
+    ├── validation/                               # Validation tests
+    │   ├── test_invalid_coco_format.py           # Validation tests for invalid COCO annotations
+    │   └── test_malformed_geojson.py             # Validation tests for malformed GeoJSON datasets
+    ├── security/                                 # Security tests
+    │   └── test_deployment_security.py           # Security tests for deployment environments
+    ├── monitoring/                               # Monitoring tests
+    │   └── test_prometheus_metrics.py            # Test for monitoring metrics like loss and accuracy
+    ├── fuzz/                                     # Fuzz tests for input validation
+    │   └── test_preprocess_fuzz.py
+    ├── compatibility/                            # Compatibility tests (e.g., for library versions)
+    │   └── test_huggingface_version.py
+    ├── distributed/                              # Tests for parallel/distributed training and inference
+    │   ├── test_distributed_training.py          # Test distributed multi-GPU training
+    │   └── test_distributed_inference.py         # Test distributed inference
+    ├── test_data/                                # Folder for mock data used in tests
+    │   ├── coco_sample.json
+    │   └── xview_sample.geojson
+    └── conftest.py                               # Shared fixtures for the test suite
 ```
 
 ## Features

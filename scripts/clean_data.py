@@ -1,7 +1,5 @@
 # scripts/clean_data.py
 
-# scripts/clean_data.py
-
 import os
 import json
 import shutil

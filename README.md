@@ -1,3 +1,5 @@
+# Overhead Object Detection Repository
+
 ## Overview
 
 Welcome to the `overhead-object-detection` Repository. This repository is designed for high-performance object detection tasks on overhead imagery, such as satellite images, using state-of-the-art machine learning models. The repository supports various datasets, foundation models, custom models, and advanced fine-tuning techniques, including PEFT (Parameter-Efficient Fine-Tuning) and FSDP (Fully Sharded Data Parallel).
@@ -186,98 +188,76 @@ rare-objects-ultimatum/
 
 ## Features
 
-- **Multi-dataset Support**: Easily handle and preprocess datasets such as xView, SpaceNet, and more.
-- **Foundation and Custom Models**: Leverage pre-trained models and create custom architectures tailored for overhead object detection.
-- **Advanced Fine-tuning**: Utilize PEFT and FSDP for efficient and scalable fine-tuning.
-- **Hyperparameter Optimization**: Integrated hyperparameter tuning with detailed tracking and reporting using MLflow.
-- **Comprehensive Deployment**: Docker and Kubernetes configurations for easy model deployment in various environments.
-- **Monitoring**: Prometheus and Grafana integration for monitoring deployed models.
+- **Multi-dataset Support**: Supports datasets such as xView, SpaceNet, and custom formats.
+- **Foundation and Custom Models**: Leverage pre-trained foundation models or develop custom object detection models.
+- **Advanced Fine-tuning**: Use PEFT and FSDP for efficient fine-tuning with large models.
+- **Hyperparameter Optimization**: MLflow integration for tracking hyperparameter search and evaluation.
+- **Comprehensive Deployment**: Docker and Kubernetes configurations for easy deployment.
+- **Monitoring and Logging**: Prometheus and Grafana integration for model monitoring in production.
 
-## GitLab - Getting started
+## Getting Started
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### Prerequisites
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+To work with this repository, you'll need to install the required dependencies. The repository uses Python, so ensure that you have Python installed on your machine.
 
-## Add your files
+1. Clone the repository:
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+    ```bash
+    git clone https://github.com/your-repo/overhead-object-detection.git
+    cd overhead-object-detection
+    ```
 
-cd existing_repo
-git remote add origin https://gitlab.dso.xc.nga.mil/rare-objects/rare-objects-ultimatum.git
-git branch -M main
-git push -uf origin main
+2. Install dependencies:
 
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-## Integrate with your tools
+### Example: Training a Model
 
-- [ ] [Set up project integrations](https://gitlab.dso.xc.nga.mil/rare-objects/rare-objects-ultimatum/-/settings/integrations)
+```bash
+python src/scripts/train_model.py --config configs/training/default_training.yml
+```
 
-## Collaborate with your team
+You can modify the training configuration by editing the `.yml` files under `configs/training/` directory.
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+### Example: Inference
 
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```bash
+python src/scripts/inference.py --model_path output/detr_model --image_path data/samples/sample_image.jpg
+```
 
 ## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+We welcome contributions to the repository! Please follow these steps:
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+1. Fork the repository.
+2. Create a new branch: \`git checkout -b feature/my-feature\`.
+3. Make your changes and commit them: \`git commit -m 'Add some feature'\`.
+4. Push to the branch: \`git push origin feature/my-feature\`.
+5. Submit a pull request.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+### Development Guidelines
+
+- Follow the repository's code style defined in `.vscode/settings.json`.
+- Ensure that all new features are covered by unit tests in the `tests/` directory.
+- Run `black` and `flake8` to format and lint your code before submitting a pull request.
+
+### Issue Tracking
+
+Please use the [issue tracker](https://github.com/your-repo/overhead-object-detection/issues) to report bugs or request features.
+
+## Roadmap
+
+- [ ] Add support for more overhead datasets.
+- [ ] Extend fine-tuning capabilities with additional HuggingFace Transformer models.
+- [ ] Improve the UI for model monitoring and experiment tracking using Grafana and MLflow.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+Thanks to everyone who has contributed to this project. Special recognition to the developers of HuggingFace Transformers and PEFT, which are core dependencies for this repository.

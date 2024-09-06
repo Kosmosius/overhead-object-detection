@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "overhead-object-detection"
+version = "0.1.0"
+description = "Welcome to the overhead-object-detection Repository. This repository is designed for high-performance object detection tasks on overhead imagery, such as satellite images, using state-of-the-art machine learning models."
+authors = ["kosmosius <kosmosius@protonmail.com>"]
+license = "MIT License"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

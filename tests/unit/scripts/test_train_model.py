@@ -136,9 +136,10 @@ def test_unsupported_peft_model(mock_from_pretrained):
 
 # Mocking HuggingFace Trainer API
 @mock.patch('transformers.Trainer.train')
-@mock.patch('mlflow.utils.validation.MAX_PARAM_VAL_LENGTH', 250)  # Mocking mlflow if necessary
-def test_trainer_api_integration(mock_trainer_train, mock_mlflow):
+@mock.patch('mlflow.utils.validation', create=True)
+def test_trainer_api_integration(mock_trainer_train, mock_mlflow_validation):
     """Test integration with HuggingFace Trainer API."""
+    mock_mlflow_validation.MAX_PARAM_VAL_LENGTH = 250
     model = mock.MagicMock()
     args = TrainingArguments(output_dir="output")
     trainer = Trainer(model=model, args=args)
@@ -168,7 +169,7 @@ def test_resume_training_from_checkpoint(mock_path_exists, mock_torch_load):
 
 
 # Performance test: distributed training setup (mocked)
-@mock.patch('sys.argv', ['train_model.py', '--config', 'config.yaml'])
+@mock.patch('sys.argv', ['train_model.py', '--config', 'config.yaml', '--distributed'])
 @mock.patch('torch.cuda.is_available', return_value=True)
 @mock.patch('torch.distributed.init_process_group')
 def test_distributed_training_setup(mock_init_process_group, mock_is_available):
@@ -180,5 +181,4 @@ def test_distributed_training_setup(mock_init_process_group, mock_is_available):
     device = torch.device("cuda" if mock_is_available() else "cpu")
     assert device == torch.device("cuda")
     mock_init_process_group.assert_called_once()
-
 

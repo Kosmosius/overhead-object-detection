@@ -10,12 +10,10 @@ from peft import PeftConfig, get_peft_model
 from src.training.trainer import train
 from src.training.peft_finetune import setup_peft_model, prepare_dataloader
 from src.utils.config_parser import ConfigParser
-from src.evaluation.evaluator import evaluate_model
+from src.evaluation.evaluator import Evaluator
 from src.utils.logging import setup_logging
 from src.utils.system_utils import check_device
-from torch.cuda.amp import autocast, GradScaler
-from torch.utils.data import DataLoader
-from transformers import EarlyStoppingCallback
+from torch.cuda.amp import GradScaler
 import random
 
 def parse_arguments():
@@ -98,6 +96,22 @@ def auto_lr_finder(optimizer, model, dataloader, config):
     config["learning_rate"] = best_lr
     logging.info(f"Found optimal learning rate: {best_lr}")
 
+def validate_model(model, dataloader, device):
+    """
+    Validate the model using the Evaluator class.
+
+    Args:
+        model: The object detection model to validate.
+        dataloader: The DataLoader containing validation data.
+        device: The device to run validation on.
+    
+    Returns:
+        dict: The evaluation metrics.
+    """
+    evaluator = Evaluator(model, device=device)
+    metrics = evaluator.evaluate(dataloader)
+    return metrics
+
 def main():
     args = parse_arguments()
 
@@ -121,8 +135,8 @@ def main():
         peft_config = PeftConfig.from_pretrained(config["peft_config"])
         model = setup_peft_model(config["model_name"], config["num_classes"], peft_config)
     else:
-        logging.info("No PEFT configuration provided. Using standard model setup.")
-        model = DetrForObjectDetection.from_pretrained(config["model_name"], num_labels=config["num_classes"])
+        logging.info("No PEFT configuration provided. Using HuggingFaceObjectDetectionModel.")
+        model = HuggingFaceObjectDetectionModel(config["model_name"], num_classes=config["num_classes"])
 
     # Set up optimizer and scheduler
     optimizer = AdamW(model.parameters(), lr=config["learning_rate"])
@@ -191,12 +205,12 @@ def main():
             # Periodic validation
             if (epoch + 1) % args.validate_every == 0:
                 logging.info("Evaluating the model on validation data...")
-                metrics = evaluate_model(model, val_loader, device=device)
+                metrics = validate_model(model, val_loader, device=device)
                 logging.info(f"Validation metrics: {metrics}")
 
     # Save the final model
     output_model_path = os.path.join(config["output_dir"], "final_model")
-    model.save_pretrained(output_model_path)
+    model.save(output_model_path)
     logging.info(f"Final model saved to {output_model_path}")
 
 if __name__ == "__main__":

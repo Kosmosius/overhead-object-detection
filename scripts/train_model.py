@@ -1,5 +1,7 @@
 # scripts/train_model.py
 
+# scripts/train_model.py
+
 import os
 import argparse
 import logging
@@ -7,7 +9,7 @@ import torch
 from transformers import AdamW, get_scheduler, DetrFeatureExtractor
 from transformers import Trainer, TrainingArguments
 from peft import PeftConfig, get_peft_model
-from src.training.trainer import train
+from src.training.trainer import train_model
 from src.training.peft_finetune import setup_peft_model, prepare_dataloader
 from src.utils.config_parser import ConfigParser
 from src.evaluation.evaluator import Evaluator
@@ -196,7 +198,7 @@ def main():
         # Manual training loop with mixed precision
         for epoch in range(start_epoch, config["num_epochs"]):
             logging.info(f"Starting epoch {epoch + 1}/{config['num_epochs']}")
-            train(model, train_loader, optimizer, scheduler, scaler, device=device)
+            train_model(model, train_loader, optimizer, scheduler, scaler, device=device)
 
             # Save checkpoint
             if (epoch + 1) % config.get("save_every", 1) == 0:
@@ -215,3 +217,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

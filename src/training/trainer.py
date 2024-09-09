@@ -1,9 +1,7 @@
-# src/training/trainer.py
-
 import torch
 from torch.utils.data import DataLoader
 from transformers import DetrFeatureExtractor, AdamW, get_scheduler
-from src.models.foundation_model import DetrObjectDetectionModel
+from src.models.foundation_model import HuggingFaceObjectDetectionModel
 from src.evaluation.evaluator import evaluate_model
 from src.training.loss_functions import compute_loss
 from src.training.peft_finetune import setup_peft_model, prepare_dataloader
@@ -11,10 +9,10 @@ import os
 import logging
 from peft import PeftConfig
 
+
 def setup_logging(log_file="training.log"):
     """
     Set up logging to a file and the console.
-    !Check for compatibility with `src/utils/logging.py`.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -25,12 +23,13 @@ def setup_logging(log_file="training.log"):
         ]
     )
 
+
 def train(model, dataloader, optimizer, scheduler, num_epochs=10, device='cuda', checkpoint_dir="checkpoints"):
     """
     Train the object detection model (supports PEFT).
 
     Args:
-        model (PeftModel/DetrObjectDetectionModel): The object detection model to train.
+        model (HuggingFaceObjectDetectionModel): The object detection model to train.
         dataloader (DataLoader): The training DataLoader.
         optimizer (torch.optim.Optimizer): Optimizer for model parameters.
         scheduler (torch.optim.lr_scheduler): Learning rate scheduler.
@@ -54,7 +53,7 @@ def train(model, dataloader, optimizer, scheduler, num_epochs=10, device='cuda',
             labels = [{k: v.to(device) for k, v in t.items()} for t in batch['labels']]
 
             # Forward pass and loss computation
-            outputs = model(pixel_values=pixel_values)
+            outputs = model.forward(pixel_values=pixel_values)
             loss = compute_loss(outputs, labels)
 
             # Backward pass and optimization
@@ -70,11 +69,12 @@ def train(model, dataloader, optimizer, scheduler, num_epochs=10, device='cuda',
         logging.info(f"  Epoch Loss: {epoch_loss}")
 
         # Save checkpoint
-        checkpoint_path = os.path.join(checkpoint_dir, f"detr_epoch_{epoch+1}.pt")
+        checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")
         torch.save(model.state_dict(), checkpoint_path)
         logging.info(f"Model checkpoint saved at {checkpoint_path}")
 
     logging.info("Training complete.")
+
 
 if __name__ == "__main__":
     # Define constants
@@ -95,21 +95,21 @@ if __name__ == "__main__":
 
     # Initialize feature extractor, model, optimizer, and scheduler
     feature_extractor = DetrFeatureExtractor.from_pretrained("facebook/detr-resnet-50")
-    model = setup_peft_model("facebook/detr-resnet-50", num_classes=NUM_CLASSES, peft_config=peft_config)
-    optimizer = AdamW(model.parameters(), lr=LEARNING_RATE)
-    
+    model = HuggingFaceObjectDetectionModel("facebook/detr-resnet-50", num_classes=NUM_CLASSES)
+    optimizer = AdamW(model.model.parameters(), lr=LEARNING_RATE)
+
     # Prepare the scheduler with the correct number of steps
     train_loader = prepare_dataloader(DATA_DIR, BATCH_SIZE, feature_extractor, mode="train")
     scheduler = get_scheduler(name="linear", optimizer=optimizer, num_warmup_steps=0, num_training_steps=NUM_EPOCHS * len(train_loader))
 
     # Train the model
     train(model, train_loader, optimizer, scheduler, num_epochs=NUM_EPOCHS, device=DEVICE, checkpoint_dir=CHECKPOINT_DIR)
-    
+
     # Load validation dataloader and evaluate the model
     val_loader = prepare_dataloader(DATA_DIR, BATCH_SIZE, feature_extractor, mode="val")
     precision, recall = evaluate_model(model, val_loader, device=DEVICE)
     logging.info(f"Validation Precision: {precision}, Recall: {recall}")
 
     # Save the final trained model
-    model.save_pretrained("output/detr_model") #MA dynamically determine model name or use user input
+    model.save("output/detr_model")
     logging.info("Final model saved.")

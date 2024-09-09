@@ -1,14 +1,14 @@
+# src/training.trainer.py
+
+import os
 import torch
-from torch.utils.data import DataLoader
-from transformers import DetrFeatureExtractor, AdamW, get_scheduler
+import logging
+from transformers import AdamW, get_scheduler, DetrFeatureExtractor
 from src.models.foundation_model import HuggingFaceObjectDetectionModel
-from src.evaluation.evaluator import evaluate_model
+from src.evaluation.evaluator import Evaluator
 from src.training.loss_functions import compute_loss
 from src.training.peft_finetune import setup_peft_model, prepare_dataloader
-import os
-import logging
 from peft import PeftConfig
-
 
 def setup_logging(log_file="training.log"):
     """
@@ -24,10 +24,33 @@ def setup_logging(log_file="training.log"):
     )
 
 
-def train(model, dataloader, optimizer, scheduler, num_epochs=10, device='cuda', checkpoint_dir="checkpoints"):
+def save_checkpoint(model, optimizer, scheduler, epoch, checkpoint_dir="checkpoints"):
     """
-    Train the object detection model (supports PEFT).
+    Save model checkpoint.
+    
+    Args:
+        model: The trained model.
+        optimizer: The optimizer used for training.
+        scheduler: The learning rate scheduler.
+        epoch: The current epoch number.
+        checkpoint_dir: Directory to save model checkpoints.
+    """
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "epoch": epoch
+    }
+    torch.save(checkpoint, checkpoint_path)
+    logging.info(f"Model checkpoint saved at {checkpoint_path}")
 
+
+def train_model(model, dataloader, optimizer, scheduler, num_epochs=10, device='cuda', checkpoint_dir="checkpoints"):
+    """
+    Train the object detection model.
+    
     Args:
         model (HuggingFaceObjectDetectionModel): The object detection model to train.
         dataloader (DataLoader): The training DataLoader.
@@ -42,7 +65,7 @@ def train(model, dataloader, optimizer, scheduler, num_epochs=10, device='cuda',
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     for epoch in range(num_epochs):
-        logging.info(f"Epoch {epoch + 1}/{num_epochs}")
+        logging.info(f"Starting Epoch {epoch + 1}/{num_epochs}")
         running_loss = 0.0
 
         for batch_idx, batch in enumerate(dataloader):
@@ -66,19 +89,31 @@ def train(model, dataloader, optimizer, scheduler, num_epochs=10, device='cuda',
                 logging.info(f"  Batch {batch_idx}, Loss: {loss.item()}")
 
         epoch_loss = running_loss / len(dataloader)
-        logging.info(f"  Epoch Loss: {epoch_loss}")
+        logging.info(f"Epoch {epoch + 1} completed with loss: {epoch_loss}")
 
-        # Save checkpoint
-        checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")
-        torch.save(model.state_dict(), checkpoint_path)
-        logging.info(f"Model checkpoint saved at {checkpoint_path}")
+        # Save checkpoint after each epoch
+        save_checkpoint(model, optimizer, scheduler, epoch, checkpoint_dir)
 
-    logging.info("Training complete.")
+    logging.info("Training completed.")
+
+
+def validate_model(model, dataloader, device):
+    """
+    Validate the model on the validation set.
+    
+    Args:
+        model: The trained model.
+        dataloader: The DataLoader containing validation data.
+        device: The device to run validation on.
+    """
+    evaluator = Evaluator(model, device=device)
+    metrics = evaluator.evaluate(dataloader)
+    logging.info(f"Validation results: {metrics}")
+    return metrics
 
 
 if __name__ == "__main__":
     # Define constants
-    DATASET_NAME = "coco"
     DATA_DIR = "/path/to/coco/dataset"  # Replace with your dataset path
     BATCH_SIZE = 4
     NUM_CLASSES = 91  # For COCO dataset
@@ -86,30 +121,29 @@ if __name__ == "__main__":
     LEARNING_RATE = 5e-5
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     CHECKPOINT_DIR = "output/checkpoints"
+    MODEL_NAME = "facebook/detr-resnet-50"
 
     # PEFT Configuration
-    peft_config = PeftConfig.from_pretrained("facebook/detr-resnet-50")
+    peft_config = PeftConfig.from_pretrained(MODEL_NAME)
 
     # Set up logging
     setup_logging()
 
     # Initialize feature extractor, model, optimizer, and scheduler
-    feature_extractor = DetrFeatureExtractor.from_pretrained("facebook/detr-resnet-50")
-    model = HuggingFaceObjectDetectionModel("facebook/detr-resnet-50", num_classes=NUM_CLASSES)
-    optimizer = AdamW(model.model.parameters(), lr=LEARNING_RATE)
+    feature_extractor = DetrFeatureExtractor.from_pretrained(MODEL_NAME)
+    model = HuggingFaceObjectDetectionModel(MODEL_NAME, num_classes=NUM_CLASSES)
 
-    # Prepare the scheduler with the correct number of steps
+    optimizer = AdamW(model.model.parameters(), lr=LEARNING_RATE)
     train_loader = prepare_dataloader(DATA_DIR, BATCH_SIZE, feature_extractor, mode="train")
     scheduler = get_scheduler(name="linear", optimizer=optimizer, num_warmup_steps=0, num_training_steps=NUM_EPOCHS * len(train_loader))
 
     # Train the model
-    train(model, train_loader, optimizer, scheduler, num_epochs=NUM_EPOCHS, device=DEVICE, checkpoint_dir=CHECKPOINT_DIR)
+    train_model(model, train_loader, optimizer, scheduler, num_epochs=NUM_EPOCHS, device=DEVICE, checkpoint_dir=CHECKPOINT_DIR)
 
     # Load validation dataloader and evaluate the model
     val_loader = prepare_dataloader(DATA_DIR, BATCH_SIZE, feature_extractor, mode="val")
-    precision, recall = evaluate_model(model, val_loader, device=DEVICE)
-    logging.info(f"Validation Precision: {precision}, Recall: {recall}")
+    validate_model(model, val_loader, device=DEVICE)
 
-    # Save the final trained model
+    # Save the final model
     model.save("output/detr_model")
     logging.info("Final model saved.")

@@ -11,7 +11,15 @@ from src.utils.system_utils import check_device, check_disk_space, check_memory_
 from src.utils.logging import setup_logging
 
 # Set up logging
-setup_logging(log_file="evaluation.log")
+log_file = "logs/evaluation.log"
+log_dir = os.path.dirname(log_file)
+
+# Ensure the directory for the log file exists, if a directory is specified
+if log_dir:
+    os.makedirs(log_dir, exist_ok=True)
+
+# Setup logging
+setup_logging(log_file=log_file)
 
 def evaluate_model(model_checkpoint: str, data_dir: str, config_path: str, batch_size: int, device: str, iou_threshold: float):
     """

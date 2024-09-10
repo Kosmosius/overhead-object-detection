@@ -5,7 +5,7 @@ import os
 from logging.handlers import RotatingFileHandler
 from transformers.utils.logging import get_logger
 
-def setup_logging(log_file=None, log_level=logging.INFO, max_bytes=10_485_760, backup_count=5):
+def setup_logging(log_file="logs/evaluation.log", log_level=logging.INFO, max_bytes=10_485_760, backup_count=5):
     """
     Set up logging for the project. Logs to both the console and optionally to a rotating file.
     

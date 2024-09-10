@@ -7,7 +7,7 @@ from src.models.foundation_model import HuggingFaceObjectDetectionModel
 from src.data.dataloader import get_dataloader
 from src.utils.config_parser import ConfigParser
 from src.training.loss_functions import get_loss_function
-from src.evaluation.evaluator import evaluate_model
+from src.evaluation.evaluator import Evaluator
 from src.utils.logging import setup_logging
 from transformers import HfArgumentParser
 from ray import tune
@@ -36,7 +36,7 @@ def hyperparameter_search(model, train_dataloader, val_dataloader, training_args
         args=training_args,
         train_dataset=train_dataloader.dataset,
         eval_dataset=val_dataloader.dataset,
-        compute_metrics=lambda p: evaluate_model(p, val_dataloader),
+        compute_metrics=lambda p: run_evaluation(model, val_dataloader, p),
         tokenizer=None,
     )
 
@@ -53,6 +53,21 @@ def hyperparameter_search(model, train_dataloader, val_dataloader, training_args
 
     best_trial = analysis.get_best_trial(metric="eval_loss", mode="min")
     print(f"Best hyperparameters: {best_trial.config}")
+
+def run_evaluation(model, val_dataloader, predictions):
+    """
+    Evaluate model predictions using the Evaluator class.
+
+    Args:
+        model (HuggingFaceObjectDetectionModel): HuggingFace model instance.
+        val_dataloader (DataLoader): Validation DataLoader.
+        predictions (dict): Model predictions.
+
+    Returns:
+        dict: Evaluation metrics (e.g., mAP).
+    """
+    evaluator = Evaluator(model, val_dataloader, device="cuda")  # Assuming 'cuda' device
+    return evaluator.evaluate(predictions)
 
 def main():
     parser = argparse.ArgumentParser(description="Hyperparameter optimization for object detection models.")
@@ -107,6 +122,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 """
 python scripts/optimize_hparams.py --model_checkpoint output/detr_model --config_path configs/training/default_training.yml --data_dir /path/to/data --batch_size 4 --num_epochs 5 --device cuda

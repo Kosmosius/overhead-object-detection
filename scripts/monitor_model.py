@@ -6,7 +6,7 @@ import torch
 from src.models.foundation_model import HuggingFaceObjectDetectionModel
 from src.utils.config_parser import ConfigParser
 from src.utils.logging import setup_logging
-from src.evaluation.evaluator import evaluate_model
+from src.evaluation.evaluator import Evaluator
 from src.data.dataloader import get_dataloader
 from src.utils.system_utils import check_device
 from prometheus_client import Gauge, start_http_server
@@ -28,7 +28,8 @@ def monitor_model_performance(model, dataloader, device, metrics_interval=30):
         metrics_interval (int): Time interval in seconds for reporting metrics.
     """
     while True:
-        metrics = evaluate_model(model, dataloader, device)
+        evaluator = Evaluator(model, dataloader, device)
+        metrics = evaluator.evaluate()
         
         # Update Prometheus metrics
         LOSS_METRIC.set(metrics.get("total_loss", 0))

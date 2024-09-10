@@ -1,19 +1,17 @@
 # scripts/optimize_hparams.py
 
 import argparse
-import torch
-from transformers import TrainingArguments, Trainer, HfArgumentParser
+import os
+import ray
+from ray import tune
+from ray.tune.schedulers import ASHAScheduler
+from ray.tune import CLIReporter
+from transformers import TrainingArguments, Trainer, DetrForObjectDetection, DetrFeatureExtractor
 from src.models.foundation_model import HuggingFaceObjectDetectionModel
 from src.data.dataloader import get_dataloader
 from src.utils.config_parser import ConfigParser
-from src.training.loss_functions import get_loss_function
 from src.evaluation.evaluator import Evaluator
 from src.utils.logging import setup_logging
-from transformers import HfArgumentParser
-from ray import tune
-from ray.tune.schedulers import ASHAScheduler
-from ray.tune.integration.huggingface import HuggingFaceTrainer
-from ray.tune.search.hyperopt import HyperOptSearch
 
 def hyperparameter_search(model, train_dataloader, val_dataloader, training_args, search_space):
     """
@@ -26,48 +24,41 @@ def hyperparameter_search(model, train_dataloader, val_dataloader, training_args
         training_args (TrainingArguments): HuggingFace TrainingArguments for the model.
         search_space (dict): Dictionary defining the hyperparameter search space.
     """
-    # Ray Tune search algorithm and scheduler
-    hyperopt_search = HyperOptSearch()
-    scheduler = ASHAScheduler(metric="eval_loss", mode="min")
+    def model_init():
+        return model.model  # Use your HuggingFace model initialization here
 
-    # Create a HuggingFaceTrainer instance for Ray Tune
-    tune_trainer = HuggingFaceTrainer(
-        model=model.model,
+    trainer = Trainer(
+        model_init=model_init,
         args=training_args,
         train_dataset=train_dataloader.dataset,
         eval_dataset=val_dataloader.dataset,
-        compute_metrics=lambda p: run_evaluation(model, val_dataloader, p),
-        tokenizer=None,
+        compute_metrics=Evaluator.compute_metrics,  # Custom evaluation function
     )
 
-    # Run Ray Tune hyperparameter search
-    analysis = tune.run(
-        tune.with_parameters(tune_trainer),
-        config=search_space,
-        metric="eval_loss",
-        mode="min",
-        search_alg=hyperopt_search,
+    # Setup Ray Tune integration with HuggingFace
+    tune_config = search_space
+
+    # Ray Tune scheduler
+    scheduler = ASHAScheduler(metric="eval_loss", mode="min")
+
+    # CLI Reporter for better feedback in the console
+    reporter = CLIReporter(
+        parameter_columns=["learning_rate", "num_train_epochs", "per_device_train_batch_size"],
+        metric_columns=["eval_loss", "eval_accuracy", "epoch", "training_iteration"]
+    )
+
+    # Run the hyperparameter search
+    trainer.hyperparameter_search(
+        hp_space=lambda _: tune_config,
+        backend="ray",
+        n_trials=10,  # Adjust the number of trials
+        resources_per_trial={"cpu": 2, "gpu": 1},  # Adjust for your setup
         scheduler=scheduler,
-        num_samples=10,  # Number of hyperparameter configurations to try
+        keep_checkpoints_num=1,
+        progress_reporter=reporter,
+        local_dir="./ray_results",  # Directory to store results
+        log_to_file=True,
     )
-
-    best_trial = analysis.get_best_trial(metric="eval_loss", mode="min")
-    print(f"Best hyperparameters: {best_trial.config}")
-
-def run_evaluation(model, val_dataloader, predictions):
-    """
-    Evaluate model predictions using the Evaluator class.
-
-    Args:
-        model (HuggingFaceObjectDetectionModel): HuggingFace model instance.
-        val_dataloader (DataLoader): Validation DataLoader.
-        predictions (dict): Model predictions.
-
-    Returns:
-        dict: Evaluation metrics (e.g., mAP).
-    """
-    evaluator = Evaluator(model, val_dataloader, device="cuda")  # Assuming 'cuda' device
-    return evaluator.evaluate(predictions)
 
 def main():
     parser = argparse.ArgumentParser(description="Hyperparameter optimization for object detection models.")
@@ -106,19 +97,19 @@ def main():
         per_device_eval_batch_size=args.batch_size,
         num_train_epochs=args.num_epochs,
         weight_decay=0.01,
+        logging_dir="./logs",
     )
 
     # Define the search space for hyperparameter tuning
     search_space = {
         "learning_rate": tune.loguniform(1e-5, 5e-4),
-        "num_train_epochs": tune.choice([3, 5, 10]),
+        "num_train_epochs": tune.choice([2, 3, 5]),
         "per_device_train_batch_size": tune.choice([4, 8, 16]),
         "weight_decay": tune.uniform(0.01, 0.1),
     }
 
     # Run hyperparameter optimization
     hyperparameter_search(model, train_loader, val_loader, training_args, search_space)
-
 
 if __name__ == "__main__":
     main()

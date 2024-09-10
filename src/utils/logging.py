@@ -15,6 +15,9 @@ def setup_logging(log_file=None, log_level=logging.INFO, max_bytes=10_485_760, b
         max_bytes (int, optional): Maximum size in bytes for the rotating log file before a new one is created. Defaults to 10MB.
         backup_count (int, optional): Number of backup log files to keep. Defaults to 5.
     """
+    # Ensure the log_file has a directory
+    log_dir = os.path.dirname(log_file)
+    
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     handlers = [logging.StreamHandler()]
 

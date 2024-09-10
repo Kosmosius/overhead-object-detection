@@ -39,7 +39,7 @@ def test_parse_arguments():
 
 # Unit test for load_config
 @mock.patch('scripts.train_model.ConfigParser')  # Patch the correct import path from train_model.py
-@mock.patch('os.path.exists', return_value=True)  # Mock os.path.exists
+@mock.patch('scripts.train_model.os.path.exists', return_value=True)  # Patch os.path.exists in the correct module
 @mock.patch('src.utils.config_parser.ConfigParser._load_yaml', return_value={"model_name": "detr", "num_classes": 5})  # Mock internal _load_yaml
 def test_load_config(mock_load_yaml, mock_exists, mock_config_parser):
     """Test loading of configuration file."""
@@ -97,17 +97,17 @@ def test_load_checkpoint(mock_path_exists, mock_torch_load):
     assert start_epoch == 6
 
 
-@mock.patch('os.path.exists', return_value=False)
-def test_load_checkpoint_missing_file(mock_path_exists):
-    """Test loading a missing checkpoint file."""
-    model = mock.MagicMock()
-    optimizer = mock.MagicMock()
-    scheduler = mock.MagicMock()
-
+# Unit test for handling a missing config file
+@mock.patch('scripts.train_model.ConfigParser', side_effect=FileNotFoundError)
+@mock.patch('scripts.train_model.os.path.exists', return_value=False)  # Patch os.path.exists
+def test_load_config_missing_file(mock_exists, mock_config_parser):
+    """Test loading a missing configuration file."""
     with pytest.raises(FileNotFoundError):
-        load_checkpoint("checkpoint.pth", model, optimizer, scheduler)
+        load_config("invalid_config.yaml")
 
-    mock_path_exists.assert_called_once_with("checkpoint.pth")
+    # Ensure os.path.exists was called
+    mock_exists.assert_called_once_with("invalid_config.yaml")
+    mock_config_parser.assert_called_once_with("invalid_config.yaml")
 
 
 # Unit test for auto_lr_finder

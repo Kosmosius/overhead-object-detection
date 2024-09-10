@@ -40,7 +40,8 @@ def test_parse_arguments():
 # Unit test for load_config
 @mock.patch('src.utils.config_parser.ConfigParser')  # Mock ConfigParser first
 @mock.patch('os.path.exists', return_value=True)  # Then mock os.path.exists
-def test_load_config(mock_exists, mock_config_parser):
+@mock.patch('src.utils.config_parser.ConfigParser._load_yaml', return_value={"model_name": "detr", "num_classes": 5})  # Mock the internal _load_yaml method
+def test_load_config(mock_load_yaml, mock_exists, mock_config_parser):
     """Test loading of configuration file."""
     # Mock the configuration returned by ConfigParser
     mock_config = {"model_name": "detr", "num_classes": 5}
@@ -52,6 +53,7 @@ def test_load_config(mock_exists, mock_config_parser):
     # Verify that os.path.exists and ConfigParser were called correctly
     mock_exists.assert_called_once_with("config.yaml")
     mock_config_parser.assert_called_once_with("config.yaml")
+    mock_load_yaml.assert_called_once_with("config.yaml")
 
     # Assert that the config returned matches the mocked config
     assert config == mock_config

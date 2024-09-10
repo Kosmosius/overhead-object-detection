@@ -6,10 +6,10 @@ import torch
 from unittest import mock
 from prometheus_client import Gauge
 from scripts.monitor_model import monitor_model_performance, main
-from src.evaluation.evaluator import evaluate_model
+from src.evaluation.evaluator import Evaluator
 
 # Core test: Monitor model performance with mock data
-@mock.patch("src.evaluation.evaluator.evaluate_model")
+@mock.patch("src.evaluation.evaluator.Evaluator.evaluate")
 @mock.patch("prometheus_client.Gauge.set")
 @mock.patch("time.sleep", return_value=None)  # Prevent sleep during tests
 def test_monitor_model_performance(mock_sleep, mock_set, mock_evaluate):
@@ -38,7 +38,7 @@ def test_monitor_model_performance(mock_sleep, mock_set, mock_evaluate):
     mock_set.assert_any_call(0.82)  # Check for the mAP metric
 
 # Edge case: Handling missing metrics
-@mock.patch("src.evaluation.evaluator.evaluate_model")
+@mock.patch("src.evaluation.evaluator.Evaluator.evaluate")
 @mock.patch("prometheus_client.Gauge.set")
 @mock.patch("time.sleep", return_value=None)
 def test_monitor_model_performance_missing_metrics(mock_sleep, mock_set, mock_evaluate):
@@ -62,9 +62,8 @@ def test_monitor_model_performance_missing_metrics(mock_sleep, mock_set, mock_ev
     mock_set.assert_any_call(0.75)  # For valid recall
 
 # Edge case: Handling uninitialized model
-@mock.patch("src.evaluation.evaluator.evaluate_model")
 @mock.patch("time.sleep", return_value=None)
-def test_monitor_model_performance_uninitialized_model(mock_sleep, mock_evaluate):
+def test_monitor_model_performance_uninitialized_model(mock_sleep):
     """Test handling of uninitialized model."""
     mock_model = None  # Simulating an uninitialized model
     mock_dataloader = mock.Mock()
@@ -74,9 +73,8 @@ def test_monitor_model_performance_uninitialized_model(mock_sleep, mock_evaluate
         monitor_model_performance(mock_model, mock_dataloader, device, metrics_interval=30)
 
 # Edge case: Connection issues with Prometheus
-@mock.patch("src.evaluation.evaluator.evaluate_model")
 @mock.patch("prometheus_client.start_http_server")
-def test_main_prometheus_connection_failure(mock_start_http_server, mock_evaluate):
+def test_main_prometheus_connection_failure(mock_start_http_server):
     """Test handling Prometheus connection failure."""
     # Simulate a failure in starting Prometheus server
     mock_start_http_server.side_effect = OSError("Failed to start Prometheus server")
@@ -135,7 +133,7 @@ def test_main_invalid_device(mock_model_load, mock_config_parser, mock_monitor_p
         main()
 
 # Performance test: Large-scale monitoring
-@mock.patch("src.evaluation.evaluator.evaluate_model")
+@mock.patch("src.evaluation.evaluator.Evaluator.evaluate")
 @mock.patch("prometheus_client.Gauge.set")
 @mock.patch("time.sleep", return_value=None)
 def test_monitor_performance_large_scale(mock_sleep, mock_set, mock_evaluate, benchmark):

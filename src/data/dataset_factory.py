@@ -1,42 +1,84 @@
 # src/data/dataset_factory.py
 
+import logging
 from src.data.dataloader import get_dataloader
-from transformers import DetrFeatureExtractor, AutoFeatureExtractor
+from transformers import AutoFeatureExtractor
+
+class DatasetNotSupportedError(Exception):
+    """Custom exception for unsupported datasets."""
+    pass
+
+class BaseDatasetFactory:
+    """
+    Base class for dataset factories. 
+    This can be extended for additional datasets beyond COCO.
+    """
+    def __init__(self, data_dir, batch_size, mode='train', feature_extractor_name='facebook/detr-resnet-50'):
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+        self.mode = mode
+        self.feature_extractor_name = feature_extractor_name
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(feature_extractor_name)
+    
+    def get_dataloader(self):
+        """Abstract method to be implemented in subclasses."""
+        raise NotImplementedError("This method should be implemented by subclasses.")
+    
+    def log_dataset_info(self):
+        """Log basic dataset information."""
+        logging.info(f"Dataset: {self.__class__.__name__}")
+        logging.info(f"Data Directory: {self.data_dir}")
+        logging.info(f"Batch Size: {self.batch_size}")
+        logging.info(f"Mode: {self.mode}")
+        logging.info(f"Feature Extractor: {self.feature_extractor_name}")
+
+
+class CocoDatasetFactory(BaseDatasetFactory):
+    """
+    Dataset factory for COCO dataset.
+    Extends the BaseDatasetFactory and implements the get_dataloader method for COCO.
+    """
+    def get_dataloader(self):
+        self.log_dataset_info()  # Log dataset information for debugging
+        
+        return get_dataloader(
+            data_dir=self.data_dir,
+            batch_size=self.batch_size,
+            mode=self.mode,
+            feature_extractor=self.feature_extractor,
+            dataset_type='coco'
+        )
+
 
 class DatasetFactory:
+    """
+    Factory class to select the correct dataset factory based on the dataset type.
+    """
     def __init__(self, data_dir, batch_size, dataset_type='coco', mode='train', feature_extractor_name='facebook/detr-resnet-50'):
-        """
-        Initialize the DatasetFactory.
-
-        Args:
-            data_dir (str): Path to the dataset directory.
-            batch_size (int): Number of samples per batch.
-            dataset_type (str): Type of dataset ('coco' for now).
-            mode (str): Mode of the dataset, 'train' or 'val'.
-            feature_extractor_name (str): The name of the feature extractor from HuggingFace.
-        """
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.dataset_type = dataset_type
         self.mode = mode
+        self.feature_extractor_name = feature_extractor_name
+        self.dataset_factory = self._select_factory()
 
-        # Generalize to any feature extractor
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(feature_extractor_name)
-
-    def get_dataloader(self):
+    def _select_factory(self):
         """
-        Get the DataLoader for the specified dataset.
-
-        Returns:
-            DataLoader: DataLoader for the specified dataset.
+        Select the appropriate factory based on the dataset type.
         """
         if self.dataset_type == 'coco':
-            return get_dataloader(
+            return CocoDatasetFactory(
                 data_dir=self.data_dir,
                 batch_size=self.batch_size,
                 mode=self.mode,
-                feature_extractor=self.feature_extractor,
-                dataset_type=self.dataset_type
+                feature_extractor_name=self.feature_extractor_name
             )
         else:
-            raise ValueError(f"Dataset type {self.dataset_type} not supported.")
+            raise DatasetNotSupportedError(f"Dataset type '{self.dataset_type}' is not supported.")
+
+    def get_dataloader(self):
+        """
+        Get the dataloader by calling the appropriate factory.
+        """
+        return self.dataset_factory.get_dataloader()
+

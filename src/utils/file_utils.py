@@ -3,11 +3,16 @@
 import os
 import shutil
 import requests
+import logging
 from pathlib import Path
 from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional
+from time import sleep
+from requests.exceptions import RequestException
 
+# Set up logging for the file utilities module
+logger = logging.getLogger(__name__)
 
 def ensure_dir_exists(directory: str) -> None:
     """
@@ -18,42 +23,51 @@ def ensure_dir_exists(directory: str) -> None:
     """
     path = Path(directory)
     if not path.exists():
+        logger.info(f"Creating directory: {directory}")
         path.mkdir(parents=True, exist_ok=True)
 
-
-def download_file(url: str, output_path: str, chunk_size: int = 1024) -> None:
+def download_file(url: str, output_path: str, chunk_size: int = 1024, retries: int = 3, backoff: int = 2) -> None:
     """
-    Download a file from the specified URL and save it to the output path.
+    Download a file from the specified URL and save it to the output path, with retry mechanism.
 
     Args:
         url (str): The URL of the file to download.
         output_path (str): Path to save the downloaded file.
         chunk_size (int): Chunk size for downloading the file.
+        retries (int): Number of retries if the download fails.
+        backoff (int): Time (in seconds) to wait between retries.
     """
-    try:
-        response = requests.get(url, stream=True)
-        response.raise_for_status()  # Raise an error for bad responses (4xx, 5xx)
-        total_size = int(response.headers.get('content-length', 0))
+    attempt = 0
+    while attempt <= retries:
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()  # Raise an error for bad responses (4xx, 5xx)
+            total_size = int(response.headers.get('content-length', 0))
 
-        output_dir = Path(output_path).parent
-        ensure_dir_exists(str(output_dir))
+            ensure_dir_exists(str(Path(output_path).parent))
 
-        with open(output_path, "wb") as file, tqdm(
+            with open(output_path, "wb") as file, tqdm(
                 desc=f"Downloading {Path(output_path).name}",
                 total=total_size,
                 unit="B",
                 unit_scale=True,
                 unit_divisor=1024
-        ) as bar:
-            for data in response.iter_content(chunk_size=chunk_size):
-                file.write(data)
-                bar.update(len(data))
+            ) as bar:
+                for data in response.iter_content(chunk_size=chunk_size):
+                    file.write(data)
+                    bar.update(len(data))
 
-    except (requests.HTTPError, requests.ConnectionError) as e:
-        print(f"Failed to download {url}: {e}")
-    except IOError as e:
-        print(f"File error when saving to {output_path}: {e}")
+            logger.info(f"File downloaded successfully: {output_path}")
+            return  # Exit if the download is successful
 
+        except RequestException as e:
+            attempt += 1
+            logger.warning(f"Failed to download {url} (Attempt {attempt}/{retries}). Error: {e}")
+            if attempt <= retries:
+                logger.info(f"Retrying in {backoff} seconds...")
+                sleep(backoff)
+
+    logger.error(f"Exceeded maximum retries. Failed to download {url}")
 
 def parallel_download_files(urls: List[str], output_dir: str, max_workers: int = 4) -> None:
     """
@@ -77,8 +91,7 @@ def parallel_download_files(urls: List[str], output_dir: str, max_workers: int =
             try:
                 future.result()
             except Exception as e:
-                print(f"Error during download: {e}")
-
+                logger.error(f"Error during download: {e}")
 
 def list_files(directory: str, extension: Optional[str] = None) -> List[str]:
     """
@@ -93,13 +106,11 @@ def list_files(directory: str, extension: Optional[str] = None) -> List[str]:
     """
     path = Path(directory)
     if not path.is_dir():
+        logger.error(f"Directory {directory} does not exist.")
         raise FileNotFoundError(f"Directory {directory} does not exist.")
     
-    if extension:
-        return [str(file) for file in path.rglob(f'*{extension}') if file.is_file()]
-    else:
-        return [str(file) for file in path.rglob('*') if file.is_file()]
-
+    files = path.rglob(f'*{extension}' if extension else '*')
+    return [str(file) for file in files if file.is_file()]
 
 def move_file(src_path: str, dest_path: str) -> None:
     """
@@ -114,9 +125,10 @@ def move_file(src_path: str, dest_path: str) -> None:
         dest = Path(dest_path)
         ensure_dir_exists(str(dest.parent))
         shutil.move(str(src), str(dest))
+        logger.info(f"Moved file from {src_path} to {dest_path}")
     except (FileNotFoundError, PermissionError) as e:
-        print(f"Error moving file from {src_path} to {dest_path}: {e}")
-
+        logger.error(f"Error moving file from {src_path} to {dest_path}: {e}")
+        raise
 
 def copy_file(src_path: str, dest_path: str) -> None:
     """
@@ -131,9 +143,10 @@ def copy_file(src_path: str, dest_path: str) -> None:
         dest = Path(dest_path)
         ensure_dir_exists(str(dest.parent))
         shutil.copy(str(src), str(dest))
+        logger.info(f"Copied file from {src_path} to {dest_path}")
     except (FileNotFoundError, PermissionError) as e:
-        print(f"Error copying file from {src_path} to {dest_path}: {e}")
-
+        logger.error(f"Error copying file from {src_path} to {dest_path}: {e}")
+        raise
 
 def delete_file(file_path: str) -> None:
     """
@@ -146,11 +159,13 @@ def delete_file(file_path: str) -> None:
         file = Path(file_path)
         if file.exists():
             file.unlink()
+            logger.info(f"Deleted file: {file_path}")
         else:
+            logger.warning(f"File {file_path} does not exist.")
             raise FileNotFoundError(f"File {file_path} does not exist.")
     except (FileNotFoundError, PermissionError) as e:
-        print(f"Error deleting file {file_path}: {e}")
-
+        logger.error(f"Error deleting file {file_path}: {e}")
+        raise
 
 def get_file_size(file_path: str) -> int:
     """
@@ -164,10 +179,12 @@ def get_file_size(file_path: str) -> int:
     """
     file = Path(file_path)
     if not file.exists():
+        logger.error(f"File {file_path} does not exist.")
         raise FileNotFoundError(f"File {file_path} does not exist.")
     
-    return file.stat().st_size
-
+    size = file.stat().st_size
+    logger.info(f"File size of {file_path}: {size} bytes")
+    return size
 
 def is_file_empty(file_path: str) -> bool:
     """
@@ -180,7 +197,6 @@ def is_file_empty(file_path: str) -> bool:
         bool: True if the file is empty, False otherwise.
     """
     return get_file_size(file_path) == 0
-
 
 def read_file(file_path: str, mode: str = "r") -> str:
     """
@@ -196,11 +212,12 @@ def read_file(file_path: str, mode: str = "r") -> str:
     try:
         file = Path(file_path)
         with file.open(mode) as f:
-            return f.read()
+            content = f.read()
+        logger.info(f"Read file: {file_path}")
+        return content
     except (FileNotFoundError, PermissionError) as e:
-        print(f"Error reading file {file_path}: {e}")
-        return ""
-
+        logger.error(f"Error reading file {file_path}: {e}")
+        raise
 
 def write_file(file_path: str, content: str, mode: str = "w") -> None:
     """
@@ -216,5 +233,7 @@ def write_file(file_path: str, content: str, mode: str = "w") -> None:
         ensure_dir_exists(str(file.parent))
         with file.open(mode) as f:
             f.write(content)
+        logger.info(f"Wrote to file: {file_path}")
     except (FileNotFoundError, PermissionError) as e:
-        print(f"Error writing to file {file_path}: {e}")
+        logger.error(f"Error writing to file {file_path}: {e}")
+        raise

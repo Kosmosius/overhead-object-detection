@@ -1,7 +1,7 @@
 # src/data/augmentation.py
 
 import random
-from PIL import Image, ImageOps, ImageEnhance
+from PIL import Image, ImageEnhance
 import torchvision.transforms as T
 import torch
 
@@ -11,19 +11,28 @@ class DataAugmentor:
     This includes geometric and photometric transformations.
     """
 
-    def __init__(self, apply_geometric=True, apply_photometric=True):
-        self.apply_geometric = apply_geometric
-        self.apply_photometric = apply_photometric
-
-    def geometric_transforms(self, image):
+    def __init__(self, apply_geometric=True, apply_photometric=True, seed=None):
         """
-        Apply random geometric transformations to the image.
+        Initialize the DataAugmentor class with options to apply geometric and photometric transforms.
 
         Args:
-            image (PIL.Image or torch.Tensor): The input image.
+            apply_geometric (bool): Whether to apply geometric transformations.
+            apply_photometric (bool): Whether to apply photometric transformations.
+            seed (int, optional): Seed for reproducibility.
+        """
+        self.apply_geometric = apply_geometric
+        self.apply_photometric = apply_photometric
+        if seed is not None:
+            random.seed(seed)
+            torch.manual_seed(seed)
+        self.transform_pipeline = None
+
+    def _get_geometric_transforms(self):
+        """
+        Create the geometric transformation pipeline.
 
         Returns:
-            PIL.Image or torch.Tensor: Transformed image.
+            T.Compose: Composed geometric transformations.
         """
         transforms = []
 
@@ -36,16 +45,14 @@ class DataAugmentor:
             angle = random.uniform(-10, 10)
             transforms.append(T.RandomRotation((angle, angle)))
 
-        # Random resizing
+        # Random resizing while maintaining the aspect ratio
         if random.random() > 0.5:
-            size = random.uniform(0.8, 1.2)  # Scale between 80% and 120%
-            transforms.append(T.Resize(int(image.size[1] * size)))
+            scale = random.uniform(0.8, 1.2)  # Scale between 80% and 120%
+            transforms.append(T.Resize((int(scale * 224), int(scale * 224))))  # Example with fixed size, adjust as needed
 
-        # Apply the transformations
-        transform_pipeline = T.Compose(transforms)
-        return transform_pipeline(image)
+        return T.Compose(transforms)
 
-    def photometric_transforms(self, image):
+    def _get_photometric_transforms(self, image):
         """
         Apply random photometric transformations to the image.
 
@@ -56,7 +63,6 @@ class DataAugmentor:
             PIL.Image or torch.Tensor: Transformed image.
         """
         if isinstance(image, Image.Image):
-            # PIL-based photometric transforms
             if random.random() > 0.5:
                 enhancer = ImageEnhance.Brightness(image)
                 factor = random.uniform(0.7, 1.3)  # Adjust brightness
@@ -71,10 +77,11 @@ class DataAugmentor:
                 enhancer = ImageEnhance.Saturation(image)
                 factor = random.uniform(0.7, 1.3)  # Adjust saturation
                 image = enhancer.enhance(factor)
-        else:
-            # Tensor-based photometric transforms (for future support of Vision Transformers, etc.)
+
+        elif isinstance(image, torch.Tensor):
             if random.random() > 0.5:
-                image = T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3)(image)
+                color_jitter = T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3)
+                image = color_jitter(image)
 
         return image
 
@@ -89,9 +96,9 @@ class DataAugmentor:
             PIL.Image or torch.Tensor: Augmented image.
         """
         if self.apply_geometric:
-            image = self.geometric_transforms(image)
+            image = self._get_geometric_transforms()(image)
 
         if self.apply_photometric:
-            image = self.photometric_transforms(image)
+            image = self._get_photometric_transforms(image)
 
         return image

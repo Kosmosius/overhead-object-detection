@@ -5,17 +5,18 @@ import platform
 import psutil
 import shutil
 import logging
-from transformers.utils import is_torch_available, is_tf_available, logging as hf_logging
+from transformers.utils import is_torch_available, is_tf_available
 
 def check_device() -> torch.device:
     """
     Check if a CUDA-capable GPU is available and return the appropriate device.
-    
+
     Returns:
         torch.device: 'cuda' if a GPU is available, else 'cpu'.
     """
     if torch.cuda.is_available():
-        logging.info(f"CUDA is available. Using GPU: {torch.cuda.get_device_name(0)}")
+        gpu_name = torch.cuda.get_device_name(0)
+        logging.info(f"CUDA is available. Using GPU: {gpu_name}")
         return torch.device('cuda')
     else:
         logging.info("CUDA is not available. Using CPU.")
@@ -23,10 +24,10 @@ def check_device() -> torch.device:
 
 def check_system_info() -> dict:
     """
-    Log basic system information including platform, processor, and memory.
-    
+    Log and return basic system information including platform, processor, memory, and disk space.
+
     Returns:
-        dict: Dictionary containing system information (OS, CPU, memory).
+        dict: System information (OS, CPU, memory, disk space).
     """
     system_info = {
         "Platform": platform.system(),
@@ -40,6 +41,7 @@ def check_system_info() -> dict:
         "Disk Space (GB)": round(shutil.disk_usage("/").free / (1024 ** 3), 2)
     }
 
+    logging.info("System Information:")
     for key, value in system_info.items():
         logging.info(f"{key}: {value}")
 
@@ -48,10 +50,10 @@ def check_system_info() -> dict:
 def check_memory_requirements(min_memory_gb: int) -> bool:
     """
     Check if the system has enough RAM to meet the minimum memory requirements.
-    
+
     Args:
         min_memory_gb (int): The minimum required memory in GB.
-    
+
     Returns:
         bool: True if the system meets the memory requirements, False otherwise.
     """
@@ -65,18 +67,18 @@ def check_memory_requirements(min_memory_gb: int) -> bool:
 def check_python_version(min_version=(3, 8)) -> bool:
     """
     Check if the current Python version meets the minimum version requirement.
-    
+
     Args:
         min_version (tuple): Minimum required Python version as a tuple (major, minor).
-    
+
     Returns:
         bool: True if the current Python version meets the minimum requirement, False otherwise.
     """
-    current_version = platform.python_version_tuple()
-    current_version = tuple(map(int, current_version[:2]))
-
+    current_version = tuple(map(int, platform.python_version_tuple()[:2]))
+    
     if current_version < min_version:
-        logging.warning(f"Python {min_version[0]}.{min_version[1]} or higher is required, but found Python {current_version[0]}.{current_version[1]}.")
+        logging.warning(f"Python {min_version[0]}.{min_version[1]} or higher is required, "
+                        f"but found Python {current_version[0]}.{current_version[1]}.")
         return False
     logging.info(f"Python version check passed: {platform.python_version()}")
     return True
@@ -84,10 +86,10 @@ def check_python_version(min_version=(3, 8)) -> bool:
 def check_disk_space(min_disk_gb: int) -> bool:
     """
     Check if the system has enough free disk space.
-    
+
     Args:
         min_disk_gb (int): The minimum required disk space in GB.
-    
+
     Returns:
         bool: True if the system has enough free disk space, False otherwise.
     """
@@ -100,8 +102,7 @@ def check_disk_space(min_disk_gb: int) -> bool:
 
 def check_hf_library_installation() -> None:
     """
-    Check if necessary libraries from HuggingFace are installed (torch, tf).
-    Logs whether the libraries are available.
+    Check if necessary libraries from HuggingFace (PyTorch, TensorFlow) are installed and log their availability.
     """
     if is_torch_available():
         logging.info("PyTorch is available.")
@@ -112,3 +113,21 @@ def check_hf_library_installation() -> None:
         logging.info("TensorFlow is available.")
     else:
         logging.warning("TensorFlow is not installed or available.")
+
+def check_system_requirements(min_memory_gb: int, min_disk_gb: int, min_python_version=(3, 8)) -> bool:
+    """
+    Perform comprehensive system checks, including memory, disk space, and Python version.
+
+    Args:
+        min_memory_gb (int): Minimum required memory in GB.
+        min_disk_gb (int): Minimum required disk space in GB.
+        min_python_version (tuple): Minimum required Python version (default is 3.8).
+
+    Returns:
+        bool: True if all system checks pass, False otherwise.
+    """
+    memory_ok = check_memory_requirements(min_memory_gb)
+    disk_ok = check_disk_space(min_disk_gb)
+    python_ok = check_python_version(min_python_version)
+    
+    return memory_ok and disk_ok and python_ok

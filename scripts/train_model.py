@@ -94,7 +94,7 @@ def auto_lr_finder(optimizer, model, dataloader, config):
     Automatically find the optimal learning rate.
     """
     logging.info("Starting learning rate finder...")
-    best_lr = 1e-3  # Example logic; you can improve this
+    best_lr = 1e-3  # Placeholder; need to implement logic
     config["learning_rate"] = best_lr
     logging.info(f"Found optimal learning rate: {best_lr}")
 
@@ -127,7 +127,7 @@ def main():
     device = check_device()
 
     # Load the feature extractor and dataset
-    feature_extractor = DetrFeatureExtractor.from_pretrained(config["model_name"])
+    feature_extractor = DetrFeatureExtractor.from_pretrained(config["model_name"]) # Needs to be generalized
     train_loader = prepare_dataloader(config["data_dir"], config["batch_size"], feature_extractor, mode="train")
     val_loader = prepare_dataloader(config["data_dir"], config["batch_size"], feature_extractor, mode="val")
 
@@ -141,7 +141,7 @@ def main():
         model = HuggingFaceObjectDetectionModel(config["model_name"], num_classes=config["num_classes"])
 
     # Set up optimizer and scheduler
-    optimizer = AdamW(model.parameters(), lr=config["learning_rate"])
+    optimizer = AdamW(model.parameters(), lr=config["learning_rate"]) # Add other optimizer options
     scheduler = get_scheduler(
         name=config.get("scheduler_type", "linear"),
         optimizer=optimizer,

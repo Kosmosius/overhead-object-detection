@@ -2,33 +2,33 @@
 
 import torch
 import torch.nn as nn
+from torchvision.ops import generalized_box_iou_loss
 
 class CustomLossFunction(nn.Module):
     """
     Generalized loss function for object detection tasks.
     Supports models like DETR with configurable components.
-    
+
     Args:
         model (nn.Module): The object detection model that outputs logits and bounding boxes.
-        class_weight (float): Weight for classification loss.
-        bbox_weight (float): Weight for bounding box regression loss.
-        giou_weight (float): Weight for Generalized IoU (GIoU) loss.
+        config (dict): Configuration dict for weights and loss functions.
     """
-    def __init__(self, model, class_weight: float = 1.0, bbox_weight: float = 1.0, giou_weight: float = 1.0):
+
+    def __init__(self, model, config: dict):
         super(CustomLossFunction, self).__init__()
         self.model = model
-        self.class_weight = class_weight
-        self.bbox_weight = bbox_weight
-        self.giou_weight = giou_weight
+        self.class_weight = config.get("class_weight", 1.0)
+        self.bbox_weight = config.get("bbox_weight", 1.0)
+        self.giou_weight = config.get("giou_weight", 1.0)
+        
+        # Allow different classification losses, with default to CrossEntropy
+        self.classification_loss_fn = config.get("classification_loss_fn", nn.CrossEntropyLoss())
+        
+        # L1 loss for bounding box regression
+        self.bbox_loss_fn = config.get("bbox_loss_fn", nn.L1Loss())
 
-        # Define classification loss
-        self.classification_loss_fn = nn.CrossEntropyLoss()
-
-        # Bounding box regression loss (L1 loss)
-        self.bbox_loss_fn = nn.L1Loss()
-
-        # Placeholder for GIoU loss (can be replaced with a more advanced implementation)
-        self.giou_loss_fn = nn.SmoothL1Loss()
+        # GIoU loss using torchvision's generalized_box_iou_loss
+        self.giou_loss_fn = config.get("giou_loss_fn", generalized_box_iou_loss)
 
     def forward(self, outputs, targets):
         """
@@ -41,23 +41,23 @@ class CustomLossFunction(nn.Module):
         Returns:
             dict: Dictionary containing the total loss and individual loss components.
         """
-        pred_logits = outputs.logits
-        pred_boxes = outputs.pred_boxes
+        pred_logits = outputs['logits']
+        pred_boxes = outputs['pred_boxes']
 
         # Concatenate all target labels and boxes
         target_labels = torch.cat([t['labels'] for t in targets]).to(pred_logits.device)
         target_boxes = torch.cat([t['boxes'] for t in targets]).to(pred_boxes.device)
 
-        # Compute classification loss
+        # Classification loss
         classification_loss = self.classification_loss_fn(pred_logits, target_labels)
 
-        # Compute bounding box regression loss
+        # Bounding box regression loss
         bbox_loss = self.bbox_loss_fn(pred_boxes, target_boxes)
 
-        # Compute GIoU loss (can be replaced with a proper GIoU loss function)
+        # GIoU loss
         giou_loss = self.giou_loss_fn(pred_boxes, target_boxes)
 
-        # Combine the losses
+        # Combine the losses based on weights from config
         total_loss = (self.class_weight * classification_loss) + \
                      (self.bbox_weight * bbox_loss) + \
                      (self.giou_weight * giou_loss)
@@ -69,8 +69,7 @@ class CustomLossFunction(nn.Module):
             "giou_loss": giou_loss
         }
 
-
-def compute_loss(outputs, targets, model, class_weight: float = 1.0, bbox_weight: float = 1.0, giou_weight: float = 1.0):
+def compute_loss(outputs, targets, model, config: dict):
     """
     Wrapper function to compute the loss given the model's outputs and the target labels and boxes.
     
@@ -78,32 +77,23 @@ def compute_loss(outputs, targets, model, class_weight: float = 1.0, bbox_weight
         outputs (dict): Model outputs (logits and bounding boxes).
         targets (list): Target bounding boxes and labels.
         model (nn.Module): Object detection model being trained.
-        class_weight (float): Weight for classification loss.
-        bbox_weight (float): Weight for bounding box loss.
-        giou_weight (float): Weight for Generalized IoU loss.
+        config (dict): Configuration dictionary with loss weights and loss functions.
 
     Returns:
         dict: Dictionary containing the total loss and individual loss components.
     """
-    loss_fn = CustomLossFunction(model, class_weight, bbox_weight, giou_weight)
+    loss_fn = CustomLossFunction(model, config)
     return loss_fn(outputs, targets)
 
-
-def get_loss_function(model, loss_type="custom", class_weight: float = 1.0, bbox_weight: float = 1.0, giou_weight: float = 1.0):
+def get_loss_function(model, config: dict):
     """
-    Retrieve the appropriate loss function based on the specified loss type.
+    Retrieve the appropriate loss function based on the specified loss configuration.
     
     Args:
         model (nn.Module): The object detection model for which the loss function is used.
-        loss_type (str): The type of loss function to use ('custom').
-        class_weight (float): Weight for classification loss.
-        bbox_weight (float): Weight for bounding box regression loss.
-        giou_weight (float): Weight for GIoU loss.
+        config (dict): Configuration dict for specifying loss types and weights.
 
     Returns:
         nn.Module: Instantiated loss function.
     """
-    if loss_type == "custom":
-        return CustomLossFunction(model, class_weight, bbox_weight, giou_weight)
-    else:
-        raise ValueError(f"Loss type '{loss_type}' is not supported.")
+    return CustomLossFunction(model, config)

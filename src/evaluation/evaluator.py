@@ -3,123 +3,120 @@
 import torch
 import logging
 from tqdm import tqdm
-from src.utils.metrics import compute_map
+from typing import List, Dict, Any
+from src.utils.metrics import evaluate_model
 
 class Evaluator:
-    def __init__(self, model, device: str = 'cuda', confidence_threshold: float = 0.5):
+    """
+    Class for evaluating object detection models.
+    Computes metrics such as mAP, precision, recall, and F1 score using the consolidated metrics module.
+    """
+
+    def __init__(self, model: torch.nn.Module, device: str = 'cuda', confidence_threshold: float = 0.5):
         """
-        Initialize the evaluator with the model and device.
+        Initialize the Evaluator.
 
         Args:
-            model: HuggingFace object detection model (e.g., DETR, YOLO).
+            model (torch.nn.Module): The object detection model to evaluate.
             device (str): Device to run the evaluation on ('cuda' or 'cpu').
-            confidence_threshold (float): Minimum confidence score for considering a detection valid.
+            confidence_threshold (float): Confidence threshold to filter predictions.
         """
         self.model = model.to(device)
         self.device = device
         self.confidence_threshold = confidence_threshold
         self.model.eval()
+        logging.info(f"Evaluator initialized with model on device '{self.device}'.")
 
-    def _process_batch(self, outputs, targets):
+    def evaluate(self, dataloader: torch.utils.data.DataLoader) -> Dict[str, float]:
         """
-        Process a batch of model outputs and targets to extract predictions and ground truths.
+        Evaluate the model using the provided dataloader.
 
         Args:
-            outputs (dict): Model outputs containing predicted bounding boxes and logits.
-            targets (list): List of dictionaries with ground truth bounding boxes and labels.
+            dataloader (torch.utils.data.DataLoader): DataLoader for the evaluation dataset.
 
         Returns:
-            List[dict]: List of predictions and ground truth dictionaries.
-        """
-        pred_boxes = outputs['pred_boxes']
-        pred_logits = outputs['logits']
-
-        predictions = []
-        ground_truths = []
-
-        for i in range(len(pred_boxes)):
-            pred_scores = torch.softmax(pred_logits[i], dim=-1)
-            scores, labels = pred_scores.max(dim=-1)
-            
-            # Apply confidence threshold
-            valid = scores >= self.confidence_threshold
-            pred_boxes_valid = pred_boxes[i][valid].detach().cpu()
-            scores_valid = scores[valid].detach().cpu()
-            labels_valid = labels[valid].detach().cpu()
-
-            # Store predictions
-            predictions.append({
-                'boxes': pred_boxes_valid,
-                'scores': scores_valid,
-                'labels': labels_valid
-            })
-
-            # Store ground truth
-            gt_boxes = targets[i]['boxes'].cpu()
-            gt_labels = targets[i]['labels'].cpu()
-            ground_truths.append({
-                'boxes': gt_boxes,
-                'labels': gt_labels
-            })
-
-        return predictions, ground_truths
-
-    def evaluate(self, dataloader, iou_thresholds=[0.5]):
-        """
-        Evaluate the model on the provided dataloader and compute precision, recall, and mAP.
-
-        Args:
-            dataloader (torch.utils.data.DataLoader): Dataloader with validation or test data.
-            iou_thresholds (list): IoU thresholds for mAP calculation.
-
-        Returns:
-            dict: Computed precision, recall, F1-score, and mAP.
+            Dict[str, float]: Dictionary containing evaluation metrics.
         """
         all_predictions = []
         all_ground_truths = []
 
-        # Validation for input types
-        assert isinstance(dataloader, torch.utils.data.DataLoader), "dataloader must be a valid DataLoader"
-        assert hasattr(self.model, "eval"), "The model should implement an evaluation method"
-
-        logging.info("Starting model evaluation...")
         with torch.no_grad():
-            for batch in tqdm(dataloader, desc="Evaluating"):
-                images, targets = batch
-                images = torch.stack(images).to(self.device)
+            for images, targets in tqdm(dataloader, desc="Evaluating"):
+                # Move images and targets to the device
+                images = [img.to(self.device) for img in images]
+                targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
 
-                # Mixed precision inference (optional, faster)
-                with torch.cuda.amp.autocast():
-                    outputs = self.model(pixel_values=images)
+                # Forward pass
+                outputs = self.model(images)
 
                 # Process outputs and targets
-                predictions, ground_truths = self._process_batch(outputs, targets)
-                all_predictions.extend(predictions)
-                all_ground_truths.extend(ground_truths)
+                batch_predictions = self._process_outputs(outputs)
+                batch_ground_truths = self._process_targets(targets)
 
-        # Compute metrics
-        metrics = compute_map(all_predictions, all_ground_truths, iou_thresholds)
+                # Append to lists
+                all_predictions.extend(batch_predictions)
+                all_ground_truths.extend(batch_ground_truths)
+
+        # Compute metrics using the consolidated module
+        metrics = evaluate_model(all_predictions, all_ground_truths)
+
         logging.info(f"Evaluation completed. Metrics: {metrics}")
         return metrics
 
-    def save_metrics(self, metrics: dict, output_path: str, output_format='txt'):
+    def _process_outputs(self, outputs: List[Dict[str, Any]]) -> List[Dict[str, torch.Tensor]]:
         """
-        Save the evaluation metrics to a file.
+        Process model outputs to extract predictions.
 
         Args:
-            metrics (dict): Computed metrics to save.
-            output_path (str): Path to save the metrics file.
-            output_format (str): Format of the output file ('txt' or 'json').
+            outputs (List[Dict[str, Any]]): Raw outputs from the model.
+
+        Returns:
+            List[Dict[str, torch.Tensor]]: Processed predictions.
         """
-        assert output_format in ['txt', 'json'], "Output format must be 'txt' or 'json'"
+        processed_predictions = []
 
-        if output_format == 'json':
-            import json
-            with open(output_path, 'w') as f:
-                json.dump(metrics, f, indent=4)
-        else:
-            with open(output_path, 'w') as f:
-                for metric, value in metrics.items():
-                    f.write(f"{metric}: {value}\n")
+        for output in outputs:
+            # Apply confidence threshold
+            scores = output['scores']
+            keep = scores >= self.confidence_threshold
 
-        logging.info(f"Evaluation metrics saved to {output_path}")
+            # Extract boxes, labels, and scores
+            boxes = output['boxes'][keep].detach().cpu()
+            labels = output['labels'][keep].detach().cpu()
+            scores = scores[keep].detach().cpu()
+
+            prediction = {
+                'boxes': boxes,
+                'labels': labels,
+                'scores': scores,
+                # Include image_id if available
+                'image_id': output.get('image_id', torch.tensor(-1)).detach().cpu()
+            }
+
+            processed_predictions.append(prediction)
+
+        return processed_predictions
+
+    def _process_targets(self, targets: List[Dict[str, Any]]) -> List[Dict[str, torch.Tensor]]:
+        """
+        Process targets to extract ground truth annotations.
+
+        Args:
+            targets (List[Dict[str, Any]]): Targets from the dataloader.
+
+        Returns:
+            List[Dict[str, torch.Tensor]]: Processed ground truths.
+        """
+        processed_targets = []
+
+        for target in targets:
+            ground_truth = {
+                'boxes': target['boxes'].detach().cpu(),
+                'labels': target['labels'].detach().cpu(),
+                # Include image_id if available
+                'image_id': target.get('image_id', torch.tensor(-1)).detach().cpu()
+            }
+
+            processed_targets.append(ground_truth)
+
+        return processed_targets

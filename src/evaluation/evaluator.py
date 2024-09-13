@@ -3,7 +3,7 @@
 import torch
 import logging
 from tqdm import tqdm
-from src.evaluation.metrics import compute_map
+from src.utils.metrics import compute_map
 
 class Evaluator:
     def __init__(self, model, device: str = 'cuda', confidence_threshold: float = 0.5):

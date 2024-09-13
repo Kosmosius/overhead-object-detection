@@ -1,16 +1,20 @@
 # src/training/peft_finetune.py
 
+import os
 import torch
 import logging
-from transformers import DetrForObjectDetection, AdamW, get_scheduler, DetrFeatureExtractor
-from peft import PeftModel, PeftConfig, get_peft_model
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 from datasets import load_dataset
 from torch.cuda.amp import autocast, GradScaler
+from transformers import AdamW, DetrFeatureExtractor, get_scheduler, DetrForObjectDetection
+from src.models.model_factory import ModelFactory
+from src.utils.config_parser import ConfigParser
+from src.utils.logging_utils import setup_logging
+from src.training.optimizers import get_optimizer_and_scheduler
+from peft import PeftModel, PeftConfig, get_peft_model
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up logging
+logger = logging.getLogger(__name__)
 
 def setup_peft_model(pretrained_model_name: str, num_classes: int, peft_config: PeftConfig) -> PeftModel:
     """
@@ -27,13 +31,13 @@ def setup_peft_model(pretrained_model_name: str, num_classes: int, peft_config: 
     try:
         model = DetrForObjectDetection.from_pretrained(pretrained_model_name, num_labels=num_classes)
         peft_model = get_peft_model(model, peft_config)
-        logging.info(f"PEFT model successfully initialized with {pretrained_model_name}.")
+        logger.info(f"PEFT model successfully initialized with {pretrained_model_name}.")
         return peft_model
     except Exception as e:
-        logging.error(f"Error setting up PEFT model: {e}")
+        logger.error(f"Error setting up PEFT model: {e}")
         raise
 
-def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFeatureExtractor, mode="train") -> DataLoader:
+def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFeatureExtractor, mode="train") -> torch.utils.data.DataLoader:
     """
     Prepare a DataLoader for a dataset (supports both COCO-style and HuggingFace datasets).
 
@@ -44,82 +48,69 @@ def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFe
         mode (str): Either "train" or "val" for training or validation mode.
 
     Returns:
-        DataLoader: Prepared DataLoader for the specified dataset.
+        torch.utils.data.DataLoader: Prepared DataLoader for the specified dataset.
     """
     try:
-        if data_dir:
-            from torchvision.datasets import CocoDetection
-            assert mode in ["train", "val"], "Mode should be either 'train' or 'val'."
-            
-            ann_file = f'annotations/instances_{mode}2017.json'
-            img_dir = f'{mode}2017'
+        from torchvision.datasets import CocoDetection
+        assert mode in ["train", "val"], "Mode should be either 'train' or 'val'."
 
-            dataset = CocoDetection(
-                root=f"{data_dir}/{img_dir}",
-                annFile=f"{data_dir}/{ann_file}",
-                transform=lambda x: feature_extractor(images=x, return_tensors="pt").pixel_values[0]
-            )
+        ann_file = os.path.join(data_dir, f'annotations/instances_{mode}2017.json')
+        img_dir = os.path.join(data_dir, f'{mode}2017')
 
-            dataloader = DataLoader(
-                dataset,
-                batch_size=batch_size,
-                shuffle=True if mode == "train" else False,
-                collate_fn=lambda batch: tuple(zip(*batch))
-            )
+        dataset = CocoDetection(
+            root=img_dir,
+            annFile=ann_file,
+            transform=lambda x: feature_extractor(images=x, return_tensors="pt").pixel_values[0]
+        )
 
-        else:
-            # Use HuggingFace's `datasets` library if no custom data directory is provided
-            dataset = load_dataset('coco', split=mode)
-            dataset.set_format(type='torch', columns=['pixel_values', 'labels'])
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=True if mode == "train" else False,
+            collate_fn=lambda batch: tuple(zip(*batch))
+        )
 
-            dataloader = DataLoader(
-                dataset,
-                batch_size=batch_size,
-                shuffle=True if mode == "train" else False
-            )
-
-        logging.info(f"Dataloader for mode '{mode}' prepared successfully with batch size {batch_size}.")
+        logger.info(f"Dataloader for mode '{mode}' prepared successfully with batch size {batch_size}.")
         return dataloader
 
     except Exception as e:
-        logging.error(f"Error preparing dataloader: {e}")
+        logger.error(f"Error preparing dataloader: {e}")
         raise
 
 def fine_tune_peft_model(
     model: PeftModel,
-    train_dataloader: DataLoader,
-    val_dataloader: DataLoader,
+    train_dataloader: torch.utils.data.DataLoader,
+    val_dataloader: torch.utils.data.DataLoader,
     optimizer,
     scheduler,
-    num_epochs: int,
-    device: str = "cuda",
-    mixed_precision: bool = True,
-    checkpoint_dir: str = "checkpoints"
-):
+    config: dict,
+    device: str = "cuda"
+) -> None:
     """
     Fine-tune a PEFT model with a training and validation loop.
 
     Args:
         model (PeftModel): The model to be fine-tuned.
-        train_dataloader (DataLoader): Dataloader for training data.
-        val_dataloader (DataLoader): Dataloader for validation data.
+        train_dataloader (torch.utils.data.DataLoader): Dataloader for training data.
+        val_dataloader (torch.utils.data.DataLoader): Dataloader for validation data.
         optimizer (torch.optim.Optimizer): Optimizer for fine-tuning.
         scheduler (torch.optim.lr_scheduler): Scheduler for learning rate adjustment.
-        num_epochs (int): Number of fine-tuning epochs.
+        config (dict): Configuration settings for training (epochs, mixed_precision, etc.).
         device (str): Device for training ('cuda' or 'cpu').
-        mixed_precision (bool): Whether to use mixed precision for faster training.
-        checkpoint_dir (str): Directory to save checkpoints.
     """
     model.to(device)
+    num_epochs = config['training']['num_epochs']
+    mixed_precision = config['training'].get('mixed_precision', True)
     scaler = GradScaler() if mixed_precision else None
+    checkpoint_dir = config['training']['checkpoint_dir']
+
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     for epoch in range(num_epochs):
         model.train()
         train_loss = 0.0
+        logger.info(f"Starting Epoch {epoch + 1}/{num_epochs}")
 
-        logging.info(f"Starting Epoch {epoch + 1}/{num_epochs}")
-        
         # Training loop
         for batch in tqdm(train_dataloader, desc=f"Training Epoch {epoch + 1}/{num_epochs}"):
             optimizer.zero_grad()
@@ -144,7 +135,7 @@ def fine_tune_peft_model(
             train_loss += loss.item()
 
         avg_train_loss = train_loss / len(train_dataloader)
-        logging.info(f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {avg_train_loss}")
+        logger.info(f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {avg_train_loss}")
 
         # Validation loop
         model.eval()
@@ -159,9 +150,71 @@ def fine_tune_peft_model(
                 val_loss += outputs.loss.item()
 
         avg_val_loss = val_loss / len(val_dataloader)
-        logging.info(f"Epoch {epoch + 1}/{num_epochs}, Validation Loss: {avg_val_loss}")
+        logger.info(f"Epoch {epoch + 1}/{num_epochs}, Validation Loss: {avg_val_loss}")
 
         # Save checkpoint
         checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")
         torch.save(model.state_dict(), checkpoint_path)
-        logging.info(f"Model checkpoint saved at {checkpoint_path}")
+        logger.info(f"Model checkpoint saved at {checkpoint_path}")
+
+def main(config_path: str) -> None:
+    """
+    Main function for fine-tuning the PEFT model using the provided configuration file.
+
+    Args:
+        config_path (str): Path to the configuration file.
+    """
+    # Load configuration
+    config_parser = ConfigParser(config_path)
+    config = config_parser.config
+
+    # Set up logging
+    setup_logging()
+    logger.info("Starting PEFT fine-tuning process.")
+
+    # Prepare feature extractor
+    feature_extractor = DetrFeatureExtractor.from_pretrained(config['model']['model_name'])
+
+    # Prepare PEFT model
+    peft_config = PeftConfig.from_pretrained(config['model']['peft_model_path'])
+    model = setup_peft_model(config['model']['model_name'], config['model']['num_classes'], peft_config)
+
+    # Prepare dataloaders
+    train_loader = prepare_dataloader(
+        data_dir=config['data']['data_dir'],
+        batch_size=config['training']['batch_size'],
+        feature_extractor=feature_extractor,
+        mode="train"
+    )
+
+    val_loader = prepare_dataloader(
+        data_dir=config['data']['data_dir'],
+        batch_size=config['training']['batch_size'],
+        feature_extractor=feature_extractor,
+        mode="val"
+    )
+
+    # Set up optimizer and scheduler
+    num_training_steps = config['training']['num_epochs'] * len(train_loader)
+    optimizer, scheduler = get_optimizer_and_scheduler(
+        model=model,
+        config=config['optimizer'],
+        num_training_steps=num_training_steps
+    )
+
+    # Fine-tune PEFT model
+    fine_tune_peft_model(
+        model=model,
+        train_dataloader=train_loader,
+        val_dataloader=val_loader,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config=config,
+        device=config['training'].get('device', 'cuda')
+    )
+
+    logger.info("PEFT fine-tuning completed.")
+
+if __name__ == "__main__":
+    config_path = "configs/peft_config.yaml"
+    main(config_path)

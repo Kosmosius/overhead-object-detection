@@ -3,17 +3,15 @@
 import yaml
 import json
 import os
-from transformers import PretrainedConfig
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
+import logging
 import jsonschema
 from jsonschema.exceptions import ValidationError
-import logging
 
 class ConfigParser:
     """
     Utility class for loading and parsing configuration files (YAML, JSON).
-    Provides integration with HuggingFace PretrainedConfig.
-    Supports schema validation for correctness.
+    Provides integration with schema validation for correctness.
     """
 
     def __init__(self, config_path: str, schema_path: Optional[str] = None):
@@ -22,7 +20,7 @@ class ConfigParser:
 
         Args:
             config_path (str): Path to the configuration file (YAML or JSON).
-            schema_path (Optional[str]): Optional path to a JSON schema for validation.
+            schema_path (Optional[str]): Optional path to a schema file (YAML or JSON) for validation.
         """
         self.config_path = config_path
         self.schema_path = schema_path
@@ -38,8 +36,8 @@ class ConfigParser:
             Dict[str, Any]: Parsed configuration data.
 
         Raises:
-            ValueError: If the file extension is not supported.
             FileNotFoundError: If the file does not exist.
+            ValueError: If the file extension is not supported.
             Exception: For other I/O or parsing errors.
         """
         if not os.path.exists(self.config_path):
@@ -70,7 +68,7 @@ class ConfigParser:
 
     def validate_schema(self) -> None:
         """
-        Validate the configuration against a provided JSON schema.
+        Validate the configuration against a provided schema (YAML or JSON).
 
         Raises:
             ValidationError: If the configuration does not conform to the schema.
@@ -79,9 +77,17 @@ class ConfigParser:
         if not os.path.exists(self.schema_path):
             raise FileNotFoundError(f"Schema file not found: {self.schema_path}")
 
+        ext = os.path.splitext(self.schema_path)[1].lower()
+
         try:
-            with open(self.schema_path, 'r') as schema_file:
-                schema = json.load(schema_file)
+            if ext in ['.yaml', '.yml']:
+                with open(self.schema_path, 'r') as schema_file:
+                    schema = yaml.safe_load(schema_file)
+            elif ext == '.json':
+                with open(self.schema_path, 'r') as schema_file:
+                    schema = json.load(schema_file)
+            else:
+                raise ValueError(f"Unsupported schema file format: {ext}")
 
             jsonschema.validate(instance=self.config, schema=schema)
             logging.info(f"Configuration at {self.config_path} is valid against the schema.")
@@ -94,10 +100,10 @@ class ConfigParser:
 
     def get(self, key: str, default: Optional[Any] = None) -> Any:
         """
-        Retrieve a value from the configuration.
+        Retrieve a value from the configuration using a dotted key path.
 
         Args:
-            key (str): The key to retrieve from the configuration.
+            key (str): The key to retrieve from the configuration, using dot notation for nested keys.
             default (Any, optional): The default value if the key is not found.
 
         Returns:
@@ -114,21 +120,24 @@ class ConfigParser:
             logging.warning(f"Key '{key}' not found in the configuration. Returning default value.")
             return default
 
-    def to_huggingface_config(self) -> PretrainedConfig:
+    def update(self, updates: Dict[str, Any]) -> None:
         """
-        Convert the parsed configuration to a HuggingFace PretrainedConfig.
+        Update the configuration with new values.
 
-        Returns:
-            PretrainedConfig: HuggingFace configuration object.
-
-        Raises:
-            ValueError: If the configuration cannot be converted to PretrainedConfig.
+        Args:
+            updates (Dict[str, Any]): Dictionary of values to update in the configuration.
         """
-        try:
-            return PretrainedConfig(**self.config)
-        except Exception as e:
-            logging.error(f"Error converting configuration to HuggingFace PretrainedConfig: {str(e)}")
-            raise ValueError(f"Error converting configuration to HuggingFace PretrainedConfig: {str(e)}")
+        self._update_dict(self.config, updates)
+        logging.info(f"Configuration updated with values: {updates}")
+
+    def _update_dict(self, d: Dict[str, Any], u: Dict[str, Any]) -> None:
+        """Recursively update a dictionary."""
+        for k, v in u.items():
+            if isinstance(v, dict):
+                d[k] = d.get(k, {})
+                self._update_dict(d[k], v)
+            else:
+                d[k] = v
 
     def save(self, output_path: str) -> None:
         """
@@ -144,35 +153,27 @@ class ConfigParser:
         ext = os.path.splitext(output_path)[1].lower()
         try:
             if ext in ['.yaml', '.yml']:
-                self._save_yaml(output_path)
+                with open(output_path, 'w') as file:
+                    yaml.safe_dump(self.config, file)
             elif ext == '.json':
-                self._save_json(output_path)
+                with open(output_path, 'w') as file:
+                    json.dump(self.config, file, indent=4)
             else:
                 raise ValueError(f"Unsupported file format for saving: {ext}")
+            logging.info(f"Configuration saved to {output_path}")
         except Exception as e:
             logging.error(f"Error saving configuration file: {str(e)}")
             raise
 
-    def _save_yaml(self, output_path: str) -> None:
-        """Save the configuration as a YAML file."""
-        with open(output_path, 'w') as file:
-            yaml.safe_dump(self.config, file)
-
-    def _save_json(self, output_path: str) -> None:
-        """Save the configuration as a JSON file."""
-        with open(output_path, 'w') as file:
-            json.dump(self.config, file, indent=4)
-
-    def update(self, updates: Dict[str, Any]) -> None:
-        """
-        Update the configuration with new values.
-
-        Args:
-            updates (Dict[str, Any]): Dictionary of values to update in the configuration.
-        """
-        self.config.update(updates)
-        logging.info(f"Configuration updated with values: {updates}")
-
     def display(self) -> None:
         """Print the current configuration in a readable format."""
-        print(json.dumps(self.config, indent=4))
+        print(yaml.dump(self.config, default_flow_style=False))
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Get the configuration as a dictionary.
+
+        Returns:
+            Dict[str, Any]: The configuration dictionary.
+        """
+        return self.config

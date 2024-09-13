@@ -2,98 +2,95 @@
 
 import torch
 import torch.nn as nn
-from torchvision.ops import generalized_box_iou_loss
+from typing import Dict, List, Any, Optional
+import logging
 
-class CustomLossFunction(nn.Module):
+logger = logging.getLogger(__name__)
+
+class LossFunctionFactory:
     """
-    Generalized loss function for object detection tasks.
-    Supports models like DETR with configurable components.
-
-    Args:
-        model (nn.Module): The object detection model that outputs logits and bounding boxes.
-        config (dict): Configuration dict for weights and loss functions.
+    Factory class to create loss functions based on configuration.
     """
 
-    def __init__(self, model, config: dict):
-        super(CustomLossFunction, self).__init__()
-        self.model = model
-        self.class_weight = config.get("class_weight", 1.0)
-        self.bbox_weight = config.get("bbox_weight", 1.0)
-        self.giou_weight = config.get("giou_weight", 1.0)
-        
-        # Allow different classification losses, with default to CrossEntropy
-        self.classification_loss_fn = config.get("classification_loss_fn", nn.CrossEntropyLoss())
-        
-        # L1 loss for bounding box regression
-        self.bbox_loss_fn = config.get("bbox_loss_fn", nn.L1Loss())
-
-        # GIoU loss using torchvision's generalized_box_iou_loss
-        self.giou_loss_fn = config.get("giou_loss_fn", generalized_box_iou_loss)
-
-    def forward(self, outputs, targets):
+    @staticmethod
+    def get_loss_function(
+        loss_type: str,
+        **kwargs
+    ) -> nn.Module:
         """
-        Compute the combined loss for object detection models.
+        Retrieve a loss function based on the specified type.
 
         Args:
-            outputs (dict): Model outputs containing logits and bounding boxes.
-            targets (list): List of dictionaries containing target bounding boxes and class labels.
+            loss_type (str): The type of loss function to use.
+            **kwargs: Additional keyword arguments for loss function initialization.
 
         Returns:
-            dict: Dictionary containing the total loss and individual loss components.
+            nn.Module: An instance of a PyTorch loss function.
         """
-        pred_logits = outputs['logits']
-        pred_boxes = outputs['pred_boxes']
-
-        # Concatenate all target labels and boxes
-        target_labels = torch.cat([t['labels'] for t in targets]).to(pred_logits.device)
-        target_boxes = torch.cat([t['boxes'] for t in targets]).to(pred_boxes.device)
-
-        # Classification loss
-        classification_loss = self.classification_loss_fn(pred_logits, target_labels)
-
-        # Bounding box regression loss
-        bbox_loss = self.bbox_loss_fn(pred_boxes, target_boxes)
-
-        # GIoU loss
-        giou_loss = self.giou_loss_fn(pred_boxes, target_boxes)
-
-        # Combine the losses based on weights from config
-        total_loss = (self.class_weight * classification_loss) + \
-                     (self.bbox_weight * bbox_loss) + \
-                     (self.giou_weight * giou_loss)
-
-        return {
-            "total_loss": total_loss,
-            "classification_loss": classification_loss,
-            "bbox_loss": bbox_loss,
-            "giou_loss": giou_loss
+        loss_functions = {
+            'cross_entropy': nn.CrossEntropyLoss,
+            'mse': nn.MSELoss,
+            'l1': nn.L1Loss,
+            'smooth_l1': nn.SmoothL1Loss,
+            # Add more loss functions as needed
         }
 
-def compute_loss(outputs, targets, model, config: dict):
+        loss_class = loss_functions.get(loss_type)
+        if not loss_class:
+            raise ValueError(f"Loss function '{loss_type}' is not supported.")
+
+        return loss_class(**kwargs)
+
+def compute_loss(
+    outputs: Dict[str, torch.Tensor],
+    targets: List[Dict[str, torch.Tensor]],
+    model: nn.Module,
+    loss_config: Dict[str, Any]
+) -> Dict[str, torch.Tensor]:
     """
-    Wrapper function to compute the loss given the model's outputs and the target labels and boxes.
-    
+    Compute the loss between model outputs and targets.
+
     Args:
-        outputs (dict): Model outputs (logits and bounding boxes).
-        targets (list): Target bounding boxes and labels.
-        model (nn.Module): Object detection model being trained.
-        config (dict): Configuration dictionary with loss weights and loss functions.
+        outputs (Dict[str, torch.Tensor]): Outputs from the model.
+        targets (List[Dict[str, torch.Tensor]]): Ground truth annotations.
+        model (nn.Module): The model being trained.
+        loss_config (Dict[str, Any]): Configuration for the loss function.
 
     Returns:
-        dict: Dictionary containing the total loss and individual loss components.
+        Dict[str, torch.Tensor]: A dictionary containing individual losses and the total loss.
     """
-    loss_fn = CustomLossFunction(model, config)
-    return loss_fn(outputs, targets)
+    loss_type = loss_config.get('loss_type', 'cross_entropy')
+    loss_weights = loss_config.get('loss_weights', {})
+    loss_kwargs = loss_config.get('loss_kwargs', {})
 
-def get_loss_function(model, config: dict):
-    """
-    Retrieve the appropriate loss function based on the specified loss configuration.
-    
-    Args:
-        model (nn.Module): The object detection model for which the loss function is used.
-        config (dict): Configuration dict for specifying loss types and weights.
+    # Instantiate the loss function
+    criterion = LossFunctionFactory.get_loss_function(loss_type, **loss_kwargs)
+    total_loss = torch.tensor(0.0, requires_grad=True).to(outputs['logits'].device)
+    loss_dict = {}
 
-    Returns:
-        nn.Module: Instantiated loss function.
-    """
-    return CustomLossFunction(model, config)
+    # Compute classification loss
+    if 'logits' in outputs and 'labels' in targets[0]:
+        logits = outputs['logits']
+        labels = torch.cat([t['labels'] for t in targets])
+        classification_loss = criterion(logits, labels)
+        weight = loss_weights.get('classification_loss', 1.0)
+        loss_dict['classification_loss'] = classification_loss * weight
+        total_loss += loss_dict['classification_loss']
+        logger.debug(f"Classification loss computed: {classification_loss.item()}")
+
+    # Compute bounding box regression loss
+    if 'pred_boxes' in outputs and 'boxes' in targets[0]:
+        pred_boxes = outputs['pred_boxes']
+        target_boxes = torch.cat([t['boxes'] for t in targets])
+        bbox_loss_fn = nn.SmoothL1Loss()
+        bbox_loss = bbox_loss_fn(pred_boxes, target_boxes)
+        weight = loss_weights.get('bbox_loss', 1.0)
+        loss_dict['bbox_loss'] = bbox_loss * weight
+        total_loss += loss_dict['bbox_loss']
+        logger.debug(f"Bounding box loss computed: {bbox_loss.item()}")
+
+    # Add other losses as needed
+    # For example, auxiliary losses, regularization terms, etc.
+
+    loss_dict['total_loss'] = total_loss
+    return loss_dict

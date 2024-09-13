@@ -4,7 +4,7 @@ import os
 import torch
 import logging
 from transformers import get_scheduler
-from src.models.foundation_model import HuggingFaceObjectDetectionModel
+from src.models.model_factory import ModelFactory
 from src.evaluation.evaluator import Evaluator
 from src.training.loss_functions import compute_loss
 from src.data.dataloader import get_dataloader
@@ -196,10 +196,12 @@ if __name__ == "__main__":
         logging.error(f"Error loading feature extractor: {e}")
         raise
 
-    model = HuggingFaceObjectDetectionModel(
+    model_instance = ModelFactory.create_model(
+        model_type=model_config.get('model_type', 'detr'),
         model_name=model_config['model_name'],
-        num_classes=model_config['num_classes']
-    ).model.to(device)
+        num_labels=model_config['num_classes']
+    )
+    model = model_instance.model.to(device)
 
     # Prepare dataloaders
     train_loader = get_dataloader(

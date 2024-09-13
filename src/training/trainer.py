@@ -1,39 +1,35 @@
-# src/training.trainer.py
+# src/training/trainer.py
 
 import os
 import torch
 import logging
-from transformers import AdamW, get_scheduler, DetrFeatureExtractor
+from transformers import get_scheduler
 from src.models.foundation_model import HuggingFaceObjectDetectionModel
 from src.evaluation.evaluator import Evaluator
 from src.training.loss_functions import compute_loss
-from src.training.peft_finetune import prepare_dataloader
-from peft import PeftConfig
+from src.data.dataloader import get_dataloader
+from src.utils.config_parser import ConfigParser
+from src.utils.logging_utils import setup_logging
+from src.training.optimizers import get_optimizer_and_scheduler
 
-def setup_logging(log_file="training.log", log_level=logging.INFO):
-    """
-    Set up logging to a file and the console.
-    """
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-    )
-
-def save_checkpoint(model, optimizer, scheduler, epoch, checkpoint_dir="checkpoints", best_model=False):
+def save_checkpoint(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler._LRScheduler,
+    epoch: int,
+    checkpoint_dir: str = "checkpoints",
+    best_model: bool = False
+) -> None:
     """
     Save model checkpoint.
 
     Args:
-        model: The trained model.
-        optimizer: The optimizer used for training.
-        scheduler: The learning rate scheduler.
-        epoch: The current epoch number.
-        checkpoint_dir: Directory to save model checkpoints.
-        best_model: Boolean flag indicating if this is the best model so far.
+        model (torch.nn.Module): The trained model.
+        optimizer (torch.optim.Optimizer): The optimizer used for training.
+        scheduler (torch.optim.lr_scheduler._LRScheduler): The learning rate scheduler.
+        epoch (int): The current epoch number.
+        checkpoint_dir (str): Directory to save model checkpoints.
+        best_model (bool): Boolean flag indicating if this is the best model so far.
     """
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")
@@ -49,17 +45,24 @@ def save_checkpoint(model, optimizer, scheduler, epoch, checkpoint_dir="checkpoi
     torch.save(checkpoint, checkpoint_path)
     logging.info(f"Model checkpoint saved at {checkpoint_path}")
 
-def train_epoch(model, dataloader, optimizer, scheduler, device, gradient_clipping=None):
+def train_epoch(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler._LRScheduler,
+    device: torch.device,
+    gradient_clipping: float = None
+) -> float:
     """
     Train the model for one epoch.
 
     Args:
-        model: The object detection model.
-        dataloader: DataLoader for the training data.
-        optimizer: Optimizer used for training.
-        scheduler: Learning rate scheduler.
-        device: Device to run the training on ('cuda' or 'cpu').
-        gradient_clipping: Value for gradient clipping (optional).
+        model (torch.nn.Module): The object detection model.
+        dataloader (torch.utils.data.DataLoader): DataLoader for the training data.
+        optimizer (torch.optim.Optimizer): Optimizer used for training.
+        scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler.
+        device (torch.device): Device to run the training on ('cuda' or 'cpu').
+        gradient_clipping (float): Value for gradient clipping (optional).
 
     Returns:
         float: The average loss for the epoch.
@@ -67,16 +70,17 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, gradient_clippi
     model.train()
     total_loss = 0.0
 
-    for batch in dataloader:
+    for images, targets in dataloader:
         optimizer.zero_grad()
 
-        pixel_values = batch['pixel_values'].to(device)
-        labels = [{k: v.to(device) for k, v in t.items()} for t in batch['labels']]
+        images = [img.to(device) for img in images]
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-        outputs = model(pixel_values=pixel_values)
-        loss = compute_loss(outputs, labels)
+        outputs = model(images)
+        loss_dict = compute_loss(outputs, targets, model, {})
+        loss = loss_dict["total_loss"]
 
-        loss["total_loss"].backward()
+        loss.backward()
 
         if gradient_clipping:
             torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
@@ -84,44 +88,57 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, gradient_clippi
         optimizer.step()
         scheduler.step()
 
-        total_loss += loss["total_loss"].item()
+        total_loss += loss.item()
 
     avg_loss = total_loss / len(dataloader)
     return avg_loss
 
-def validate_epoch(model, dataloader, device):
+def validate_epoch(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device
+) -> Dict[str, float]:
     """
     Validate the model on the validation set.
 
     Args:
-        model: The trained model.
-        dataloader: DataLoader containing validation data.
-        device: Device to run validation on.
+        model (torch.nn.Module): The trained model.
+        dataloader (torch.utils.data.DataLoader): DataLoader containing validation data.
+        device (torch.device): Device to run validation on.
 
     Returns:
-        dict: Evaluation metrics.
+        Dict[str, float]: Evaluation metrics.
     """
     evaluator = Evaluator(model, device=device)
     metrics = evaluator.evaluate(dataloader)
     return metrics
 
-def train_model(model, train_dataloader, val_dataloader, optimizer, scheduler, num_epochs=10, device='cuda', 
-                checkpoint_dir="checkpoints", gradient_clipping=None, early_stopping_patience=None):
+def train_model(
+    model: torch.nn.Module,
+    train_dataloader: torch.utils.data.DataLoader,
+    val_dataloader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler._LRScheduler,
+    config: Dict[str, Any],
+    device: torch.device,
+    checkpoint_dir: str = "checkpoints"
+) -> None:
     """
     Train and validate the object detection model.
 
     Args:
-        model: The object detection model to train.
-        train_dataloader: DataLoader for training data.
-        val_dataloader: DataLoader for validation data.
-        optimizer: Optimizer for model parameters.
-        scheduler: Learning rate scheduler.
-        num_epochs: Number of training epochs.
-        device: Device to use for training ('cuda' or 'cpu').
-        checkpoint_dir: Directory to save model checkpoints.
-        gradient_clipping: Value for gradient clipping (optional).
-        early_stopping_patience: Number of epochs with no improvement before stopping (optional).
+        model (torch.nn.Module): The object detection model to train.
+        train_dataloader (torch.utils.data.DataLoader): DataLoader for training data.
+        val_dataloader (torch.utils.data.DataLoader): DataLoader for validation data.
+        optimizer (torch.optim.Optimizer): Optimizer for model parameters.
+        scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler.
+        config (Dict[str, Any]): Configuration parameters.
+        device (torch.device): Device to use for training ('cuda' or 'cpu').
+        checkpoint_dir (str): Directory to save model checkpoints.
     """
+    num_epochs = config['training']['num_epochs']
+    gradient_clipping = config['training'].get('gradient_clipping', None)
+    early_stopping_patience = config['training'].get('early_stopping_patience', None)
     best_val_loss = float('inf')
     epochs_no_improve = 0
 
@@ -134,8 +151,7 @@ def train_model(model, train_dataloader, val_dataloader, optimizer, scheduler, n
 
         # Validate the model
         val_metrics = validate_epoch(model, val_dataloader, device)
-        val_loss = val_metrics.get("total_loss", 0.0)
-        logging.info(f"Epoch {epoch + 1} - Validation Loss: {val_loss}")
+        val_loss = val_metrics.get("AP", 0.0)  # Assuming 'AP' is the primary metric
         logging.info(f"Epoch {epoch + 1} - Validation Metrics: {val_metrics}")
 
         # Save checkpoint for the current epoch
@@ -143,7 +159,7 @@ def train_model(model, train_dataloader, val_dataloader, optimizer, scheduler, n
 
         # Early stopping based on validation loss
         if early_stopping_patience:
-            if val_loss < best_val_loss:
+            if val_loss > best_val_loss:
                 best_val_loss = val_loss
                 epochs_no_improve = 0
                 save_checkpoint(model, optimizer, scheduler, epoch, checkpoint_dir, best_model=True)
@@ -155,66 +171,76 @@ def train_model(model, train_dataloader, val_dataloader, optimizer, scheduler, n
                     break
     logging.info("Training completed.")
 
-def validate_model(model, dataloader, device):
-    """
-    Validate the model on the validation set.
-
-    Args:
-        model: The trained model.
-        dataloader: DataLoader containing validation data.
-        device: The device to run validation on.
-
-    Returns:
-        dict: Validation metrics.
-    """
-    return validate_epoch(model, dataloader, device)
-
-
 if __name__ == "__main__":
-    # Define constants
-    DATA_DIR = "/path/to/coco/dataset"  # Replace with your dataset path
-    BATCH_SIZE = 4
-    NUM_CLASSES = 91  # For COCO dataset
-    NUM_EPOCHS = 5
-    LEARNING_RATE = 5e-5
-    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-    CHECKPOINT_DIR = "output/checkpoints"
-    MODEL_NAME = "facebook/detr-resnet-50"
-
-    # PEFT Configuration
-    peft_config = PeftConfig.from_pretrained(MODEL_NAME)
+    # Load configuration
+    config_path = "configs/train_config.yaml"
+    config_parser = ConfigParser(config_path)
+    config = config_parser.config
 
     # Set up logging
-    setup_logging()
+    setup_logging(log_file=config['logging']['log_file'], log_level=config['logging']['log_level'])
 
-    # Initialize feature extractor, model, optimizer, and scheduler
-    feature_extractor = DetrFeatureExtractor.from_pretrained(MODEL_NAME)
-    model = HuggingFaceObjectDetectionModel(MODEL_NAME, num_classes=NUM_CLASSES)
+    # Define constants from configuration
+    data_config = config['data']
+    model_config = config['model']
+    training_config = config['training']
+    optimizer_config = config['optimizer']
+    scheduler_config = config['scheduler']
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    optimizer = AdamW(model.model.parameters(), lr=LEARNING_RATE)
-    train_loader = prepare_dataloader(DATA_DIR, BATCH_SIZE, feature_extractor, mode="train")
-    val_loader = prepare_dataloader(DATA_DIR, BATCH_SIZE, feature_extractor, mode="val")
+    # Initialize feature extractor and model
+    try:
+        from transformers import DetrFeatureExtractor
+        feature_extractor = DetrFeatureExtractor.from_pretrained(model_config['model_name'])
+    except Exception as e:
+        logging.error(f"Error loading feature extractor: {e}")
+        raise
 
-    num_training_steps = NUM_EPOCHS * len(train_loader)
-    scheduler = get_scheduler(name="linear", optimizer=optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
+    model = HuggingFaceObjectDetectionModel(
+        model_name=model_config['model_name'],
+        num_classes=model_config['num_classes']
+    ).model.to(device)
 
-    # Train the model with early stopping and gradient clipping
-    train_model(
-        model, 
-        train_loader, 
-        val_loader, 
-        optimizer, 
-        scheduler, 
-        num_epochs=NUM_EPOCHS, 
-        device=DEVICE, 
-        checkpoint_dir=CHECKPOINT_DIR,
-        gradient_clipping=1.0,  # Optional: enable gradient clipping
-        early_stopping_patience=3  # Optional: enable early stopping
+    # Prepare dataloaders
+    train_loader = get_dataloader(
+        data_dir=data_config['data_dir'],
+        batch_size=training_config['batch_size'],
+        mode="train",
+        feature_extractor=feature_extractor,
+        num_workers=training_config.get('num_workers', 4),
+        pin_memory=training_config.get('pin_memory', True)
     )
 
-    # Validate the model on the validation dataset
-    validate_model(model, val_loader, device=DEVICE)
+    val_loader = get_dataloader(
+        data_dir=data_config['data_dir'],
+        batch_size=training_config['batch_size'],
+        mode="val",
+        feature_extractor=feature_extractor,
+        num_workers=training_config.get('num_workers', 4),
+        pin_memory=training_config.get('pin_memory', True)
+    )
+
+    # Set up optimizer and scheduler
+    num_training_steps = training_config['num_epochs'] * len(train_loader)
+    optimizer, scheduler = get_optimizer_and_scheduler(
+        model=model,
+        config={**optimizer_config, **scheduler_config},
+        num_training_steps=num_training_steps
+    )
+
+    # Train the model
+    train_model(
+        model=model,
+        train_dataloader=train_loader,
+        val_dataloader=val_loader,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config=config,
+        device=device,
+        checkpoint_dir=training_config['checkpoint_dir']
+    )
 
     # Save the final model
-    model.save("output/detr_model")
-    logging.info("Final model saved.")
+    model_save_path = os.path.join(training_config['output_dir'], 'final_model')
+    model.save_pretrained(model_save_path)
+    logging.info(f"Final model saved at {model_save_path}")

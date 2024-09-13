@@ -9,7 +9,7 @@ from src.models.foundation_model import HuggingFaceObjectDetectionModel
 from src.utils.config_parser import ConfigParser
 from src.utils.logging import setup_logging
 from src.utils.system_utils import check_device
-from src.evaluation.metrics import evaluate_model
+from src.utils.metrics import evaluate_model
 
 def generate_evaluation_report(model_checkpoint, config_path, data_dir, output_dir, device="cuda"):
     """

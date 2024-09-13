@@ -3,7 +3,7 @@
 
 import torch
 import pytest
-from src.evaluation.metrics import compute_iou, compute_precision_recall_f1, compute_map
+from src.utils.metrics import compute_iou, compute_precision_recall_f1, compute_map
 
 def test_compute_iou():
     """Test IoU computation for simple bounding boxes."""

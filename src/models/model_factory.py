@@ -105,7 +105,7 @@ class BaseModel(ABC):
         Freeze the backbone parameters to prevent them from being updated during training.
         """
         for name, param in self.model.named_parameters():
-            if 'backbone' in name:
+            if any(backbone_layer in name for backbone_layer in ['backbone', 'body']):
                 param.requires_grad = False
         logger.info("Backbone parameters have been frozen.")
 
@@ -114,7 +114,7 @@ class BaseModel(ABC):
         Unfreeze the backbone parameters to allow them to be updated during training.
         """
         for name, param in self.model.named_parameters():
-            if 'backbone' in name:
+            if any(backbone_layer in name for backbone_layer in ['backbone', 'body']):
                 param.requires_grad = True
         logger.info("Backbone parameters have been unfrozen.")
 

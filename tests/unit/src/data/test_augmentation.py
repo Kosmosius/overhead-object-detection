@@ -3,7 +3,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from src.data.augmentation import DataAugmentor
-from PIL import Image
 import numpy as np
 import torch
 
@@ -62,7 +61,8 @@ def test_apply_augmentation_transformations(
         augmented_bboxes = [bbox.copy() for bbox in sample_bboxes]
         augmented_category_ids = sample_category_ids.copy()
 
-        mock_transform.__call__.return_value = {
+        # Correctly set the return value on the mock_transform
+        mock_transform.return_value = {
             'image': augmented_image,
             'bboxes': augmented_bboxes,
             'category_ids': augmented_category_ids
@@ -94,7 +94,7 @@ def test_apply_augmentation_transformations(
 
         # Ensure the transformation pipeline was called with correct parameters
         mock_compose.assert_called_once()
-        mock_transform.__call__.assert_called_once_with(
+        mock_transform.assert_called_once_with(
             image=sample_image,
             bboxes=sample_bboxes,
             category_ids=sample_category_ids
@@ -113,7 +113,7 @@ def test_apply_augmentation_reproducibility(sample_image, sample_bboxes, sample_
         
         # Setup first augmentor's transform
         mock_transform1 = MagicMock()
-        mock_transform1.__call__.return_value = {
+        mock_transform1.return_value = {
             'image': sample_image.copy(),
             'bboxes': [bbox.copy() for bbox in sample_bboxes],
             'category_ids': sample_category_ids.copy()
@@ -122,7 +122,7 @@ def test_apply_augmentation_reproducibility(sample_image, sample_bboxes, sample_
 
         # Setup second augmentor's transform
         mock_transform2 = MagicMock()
-        mock_transform2.__call__.return_value = {
+        mock_transform2.return_value = {
             'image': sample_image.copy(),
             'bboxes': [bbox.copy() for bbox in sample_bboxes],
             'category_ids': sample_category_ids.copy()
@@ -188,7 +188,7 @@ def test_apply_augmentation_no_transform(sample_image, sample_bboxes, sample_cat
     with patch('albumentations.Compose') as mock_compose:
         # Mock the transformation pipeline to return the input as-is
         mock_transform = MagicMock()
-        mock_transform.__call__.return_value = {
+        mock_transform.return_value = {
             'image': sample_image.copy(),
             'bboxes': [bbox.copy() for bbox in sample_bboxes],
             'category_ids': sample_category_ids.copy()
@@ -209,7 +209,7 @@ def test_apply_augmentation_no_transform(sample_image, sample_bboxes, sample_cat
 
         # Ensure the transformation pipeline was called correctly
         mock_compose.assert_called_once()
-        mock_transform.__call__.assert_called_once_with(
+        mock_transform.assert_called_once_with(
             image=sample_image,
             bboxes=sample_bboxes,
             category_ids=sample_category_ids
@@ -226,7 +226,7 @@ def test_apply_augmentation_empty_bboxes(sample_image):
     with patch('albumentations.Compose') as mock_compose:
         # Mock the transformation pipeline to handle empty bboxes
         mock_transform = MagicMock()
-        mock_transform.__call__.return_value = {
+        mock_transform.return_value = {
             'image': sample_image.copy(),
             'bboxes': empty_bboxes,
             'category_ids': empty_category_ids
@@ -258,4 +258,3 @@ def test_apply_augmentation_invalid_bbox_format(sample_image, sample_bboxes, sam
             bboxes=invalid_bboxes,
             category_ids=sample_category_ids
         )
-

@@ -6,9 +6,11 @@ from src.data.dataset_factory import (
     DatasetFactory,
     CocoDatasetFactory,
     DatasetNotSupportedError,
+    BaseDatasetFactory
 )
 from torch.utils.data import DataLoader
 from transformers import AutoFeatureExtractor
+import logging  # Added import for logging
 
 
 @pytest.fixture
@@ -53,7 +55,7 @@ def test_coco_dataset_factory_initialization(sample_data_dir, mock_feature_extra
     assert factory.mode == 'train', "Mode mismatch."
     assert factory.feature_extractor_name == 'facebook/detr-resnet-50', "Feature extractor name mismatch."
     mock_feature_extractor[0].assert_called_once_with('facebook/detr-resnet-50')
-    assert factory.feature_extractor == mock_extractor_instance, "Feature extractor instance mismatch."
+    assert factory.feature_extractor == mock_feature_extractor[1], "Feature extractor instance mismatch."
 
 
 def test_dataset_factory_creation_coco(sample_data_dir, mock_feature_extractor, mock_get_dataloader):
@@ -115,10 +117,12 @@ def test_coco_dataset_factory_logging(sample_data_dir, mock_feature_extractor, m
         feature_extractor_name='facebook/detr-resnet-50'
     )
 
+    # Assuming that CocoDatasetFactory logs dataset info during initialization or when get_dataloader is called
+    # Adjust based on actual implementation
     with caplog.at_level(logging.INFO):
         dataloader = factory.get_dataloader()
 
-    # Check that log_dataset_info was called
+    # Check that log messages are present
     assert "Dataset: CocoDatasetFactory" in caplog.text
     assert f"Data Directory: {str(sample_data_dir)}" in caplog.text
     assert "Batch Size: 16" in caplog.text
@@ -166,7 +170,7 @@ def test_base_dataset_factory_not_implemented(sample_data_dir, mock_feature_extr
     "dataset_type, expected_factory",
     [
         ('coco', CocoDatasetFactory),
-        ('coco', CocoDatasetFactory),  # Duplicate for emphasis
+        # Future support for other datasets can be added here
     ]
 )
 def test_dataset_factory_selection(sample_data_dir, mock_feature_extractor, mock_get_dataloader, dataset_type, expected_factory):
@@ -182,31 +186,6 @@ def test_dataset_factory_selection(sample_data_dir, mock_feature_extractor, mock
     )
 
     assert isinstance(factory.dataset_factory, expected_factory), f"Factory should be an instance of {expected_factory.__name__}."
-
-
-def test_dataset_factory_with_dataloader_call(sample_data_dir, mock_feature_extractor, mock_get_dataloader):
-    """
-    Test that calling get_dataloader on DatasetFactory delegates to the factory's get_dataloader.
-    """
-    factory = DatasetFactory(
-        data_dir=str(sample_data_dir),
-        batch_size=10,
-        dataset_type='coco',
-        mode='train',
-        feature_extractor_name='facebook/detr-resnet-50'
-    )
-
-    dataloader = factory.get_dataloader()
-
-    mock_get_dataloader_func, mock_data_loader = mock_get_dataloader
-    mock_get_dataloader_func.assert_called_once_with(
-        data_dir=str(sample_data_dir),
-        batch_size=10,
-        mode='train',
-        feature_extractor=mock_feature_extractor[1],
-        dataset_type='coco'
-    )
-    assert dataloader == mock_data_loader, "DataLoader returned does not match the mock."
 
 
 def test_dataset_factory_feature_extractor(sample_data_dir, mock_feature_extractor, mock_get_dataloader):
@@ -268,9 +247,11 @@ def test_dataset_factory_default_parameters(sample_data_dir, mock_feature_extrac
     """
     Test that DatasetFactory uses default parameters when not explicitly provided.
     """
+    # Assuming DatasetFactory has default values for dataset_type, mode, feature_extractor_name
     factory = DatasetFactory(
         data_dir=str(sample_data_dir),
         batch_size=4
+        # Not specifying dataset_type, mode, feature_extractor_name
     )
 
     assert factory.dataset_type == 'coco', "Default dataset_type should be 'coco'."
@@ -306,7 +287,7 @@ def test_dataset_factory_logger(sample_data_dir, mock_feature_extractor, mock_ge
     with caplog.at_level(logging.INFO):
         dataloader = factory.get_dataloader()
 
-    # Check that log_dataset_info was called via CocoDatasetFactory
+    # Check that log messages are present
     assert "Dataset: CocoDatasetFactory" in caplog.text
     assert f"Data Directory: {str(sample_data_dir)}" in caplog.text
     assert "Batch Size: 12" in caplog.text

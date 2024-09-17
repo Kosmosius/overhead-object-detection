@@ -4,14 +4,16 @@ import pytest
 from src.data.augmentation import DataAugmentor
 import numpy as np
 import torch
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 
 @pytest.fixture
 def sample_image():
     """Fixture for a sample image as a NumPy array."""
-    # Create a dummy image (224x224 RGB)
-    return np.zeros((224, 224, 3), dtype=np.uint8)
+    # Create a dummy image (224x224 RGB) with non-zero values for meaningful transformations
+    image = np.zeros((224, 224, 3), dtype=np.uint8)
+    # Set some pixels to non-zero values
+    image[50:150, 50:150, :] = 255  # White square in the center
+    image[30:100, 30:100, :] = 128  # Gray square in the top-left corner
+    return image
 
 @pytest.fixture
 def sample_bboxes():
@@ -255,4 +257,5 @@ def test_data_augmentor_without_seed(sample_image, sample_bboxes, sample_categor
 
     # With no seed, the results should differ
     assert not torch.equal(result1['image'], result2['image']), "Images should differ when no seed is set."
+    # Optionally, also check bounding boxes
     assert result1['bboxes'] != result2['bboxes'], "Bounding boxes should differ when no seed is set."

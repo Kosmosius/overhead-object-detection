@@ -1141,4 +1141,148 @@ def test_train_model_extremely_large_batch_size(mock_model_instance, mock_optimi
     config['training']['batch_size'] = 10000  # Extremely large batch size
     
     # Mock dataloader to return large batches
-    def large
+    def large_batch_generator():
+        for _ in range(default_config['training']['num_epochs']):
+            yield ([torch.randn(10000, 3, 224, 224)], [{"labels": torch.tensor([1]*10000), "boxes": torch.randn(10000, 4)}])
+    
+    mock_large_dataloader = MagicMock(spec=torch.utils.data.DataLoader)
+    mock_large_dataloader.__len__.return_value = 1
+    mock_large_dataloader.__iter__.return_value = iter([([torch.randn(10000, 3, 224, 224)], [{"labels": torch.tensor([1]*10000), "boxes": torch.randn(10000, 4)}])])
+    
+    with patch("src.training.trainer.train_epoch", return_value=1.0), \
+         patch("src.training.trainer.validate_epoch", return_value={"AP": 0.75}), \
+         patch("src.training.trainer.save_checkpoint") as mock_save_checkpoint, \
+         patch("src.training.trainer.Evaluator", return_value=MagicMock(spec=Evaluator)):
+        
+        with caplog.at_level(logging.INFO):
+            train_model(
+                model_instance=mock_model_instance,
+                train_dataloader=mock_large_dataloader,
+                val_dataloader=mock_large_dataloader,
+                optimizer=mock_optimizer,
+                scheduler=mock_scheduler,
+                config=config,
+                device=torch.device(config['training']['device']),
+                checkpoint_dir=config['training']['checkpoint_dir']
+            )
+        
+        # Verify that training proceeded without errors
+        mock_save_checkpoint.assert_called_with(
+            model_instance=mock_model_instance,
+            optimizer=mock_optimizer,
+            scheduler=mock_scheduler,
+            epoch=0,
+            checkpoint_dir=config['training']['checkpoint_dir'],
+            best_model=True
+        )
+        mock_save_checkpoint.assert_called_with(
+            model_instance=mock_model_instance,
+            optimizer=mock_optimizer,
+            scheduler=mock_scheduler,
+            epoch=0,
+            checkpoint_dir=config['training']['checkpoint_dir'],
+            best_model=False
+        )
+
+# 17. Edge Case Tests: Missing 'labels' or 'boxes' in Targets
+
+def test_train_model_missing_labels_in_targets(mock_model_instance, mock_optimizer, mock_scheduler, default_config):
+    """Test that train_model handles targets missing 'labels' or 'boxes'."""
+    # Mock dataloader to return targets missing 'labels'
+    def malformed_dataloader():
+        for _ in range(default_config['training']['num_epochs']):
+            yield ([torch.randn(3, 224, 224)], [{"boxes": torch.randn(4, 4)}])
+    
+    mock_malformed_dataloader = MagicMock(spec=torch.utils.data.DataLoader)
+    mock_malformed_dataloader.__len__.return_value = 1
+    mock_malformed_dataloader.__iter__.return_value = iter([([torch.randn(3, 224, 224)], [{"boxes": torch.randn(4, 4)}])])
+    
+    with patch("src.training.trainer.train_epoch") as mock_train_epoch:
+        mock_train_epoch.side_effect = AttributeError("Missing 'labels' in targets")
+        
+        with pytest.raises(AttributeError) as exc_info:
+            train_model(
+                model_instance=mock_model_instance,
+                train_dataloader=mock_malformed_dataloader,
+                val_dataloader=mock_malformed_dataloader,
+                optimizer=mock_optimizer,
+                scheduler=mock_scheduler,
+                config=default_config,
+                device=torch.device(default_config['training']['device']),
+                checkpoint_dir=default_config['training']['checkpoint_dir']
+            )
+        
+        assert "Missing 'labels' in targets" in str(exc_info.value), "Exception message mismatch."
+
+# 18. Edge Case Tests: Non-Callable Collate Function
+
+def test_prepare_dataloader_non_callable_collate(mock_feature_extractor, default_config):
+    """Test prepare_dataloader with a non-callable collate_fn."""
+    with patch("src.training.trainer.CocoDetection") as mock_coco_detection, \
+         patch("torch.utils.data.DataLoader") as mock_dataloader:
+        
+        mock_coco_detection.return_value = MagicMock(spec=torch.utils.data.Dataset)
+        mock_dataloader.return_value = MagicMock(spec=torch.utils.data.DataLoader)
+        
+        # Provide a non-callable collate_fn
+        with patch("src.training.trainer.CocoDetection", return_value=MagicMock(spec=torch.utils.data.Dataset)):
+            with pytest.raises(TypeError):
+                prepare_dataloader(
+                    data_dir="./data",
+                    batch_size=4,
+                    feature_extractor=mock_feature_extractor,
+                    mode="train"
+                )
+
+# 19. Edge Case Tests: Invalid Device
+
+def test_train_model_invalid_device(mock_model_instance, mock_dataloader, mock_optimizer, mock_scheduler, default_config):
+    """Test that train_model raises an error when an invalid device is specified."""
+    config = default_config.copy()
+    config['training']['device'] = "invalid_device"
+    
+    with pytest.raises(Exception):
+        train_model(
+            model_instance=mock_model_instance,
+            train_dataloader=mock_dataloader,
+            val_dataloader=mock_dataloader,
+            optimizer=mock_optimizer,
+            scheduler=mock_scheduler,
+            config=config,
+            device=torch.device(config['training']['device']),
+            checkpoint_dir=config['training']['checkpoint_dir']
+        )
+
+# 20. Edge Case Tests: Extremely Large Number of Parameter Groups
+
+def test_save_checkpoint_large_number_of_parameter_groups(mock_model_instance, mock_optimizer, mock_scheduler, default_config, caplog):
+    """Test that save_checkpoint handles a large number of parameter groups."""
+    config = default_config.copy()
+    
+    # Simulate a large number of parameter groups
+    parameter_groups = [{"params": [MagicMock()], "lr": 0.001} for _ in range(1000)]
+    mock_optimizer.state_dict.return_value = {}
+    mock_scheduler.state_dict.return_value = {}
+    
+    with patch("src.training.trainer.save_checkpoint") as mock_save_checkpoint:
+        save_checkpoint(
+            model_instance=mock_model_instance,
+            optimizer=mock_optimizer,
+            scheduler=mock_scheduler,
+            epoch=0,
+            checkpoint_dir=default_config['training']['checkpoint_dir'],
+            best_model=False
+        )
+        
+        # Verify that model_instance.save was called correctly
+        expected_path = os.path.join(default_config['training']['checkpoint_dir'], f"model_epoch_{1}")
+        mock_model_instance.save.assert_called_once_with(
+            expected_path,
+            metadata={
+                "epoch": 1,
+                "optimizer_state_dict": mock_optimizer.state_dict(),
+                "scheduler_state_dict": mock_scheduler.state_dict()
+            }
+        )
+        assert f"Model checkpoint saved at {expected_path}" in caplog.text, "Checkpoint saving log missing."
+

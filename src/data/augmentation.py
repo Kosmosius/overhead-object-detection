@@ -24,23 +24,9 @@ class DataAugmentor:
         self.apply_geometric = apply_geometric
         self.apply_photometric = apply_photometric
         self.seed = seed
-
-        transforms = []
-        if self.apply_geometric:
-            transforms.append(
-                A.Affine(scale=(0.8, 1.2), translate_percent=(0.1, 0.1))
-            )
-        if self.apply_photometric:
-            transforms.append(
-                A.RandomBrightnessContrast()
-            )
-        if transforms:
-            self.transform = A.Compose(
-                transforms,
-                bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids'])
-            )
-        else:
-            self.transform = None
+        if seed is not None:
+            random.seed(seed)
+        self.transform = self._get_transforms()
 
     def _get_transforms(self):
         """

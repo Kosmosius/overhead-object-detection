@@ -77,9 +77,11 @@ class CocoDataset(Dataset):
 
         # **Added feature extractor invocation with images as list**
         if self.feature_extractor is not None:
-            # Assuming feature_extractor expects images as a list
-            # and returns 'pixel_values' with shape (batch_size, 3, 224, 224)
-            image = self.feature_extractor(images=[image], return_tensors="pt")['pixel_values'].squeeze(0)
+            # Pass image as a list (expected by feature_extractor)
+            image = self.feature_extractor(images=[image], return_tensors="pt")['pixel_values'].squeeze()
+        else:
+            # Convert image to tensor and permute dimensions
+            image = torch.tensor(image).permute(2, 0, 1)
 
         # Prepare target
         target = {}
@@ -238,6 +240,9 @@ def get_dataloader(
         feature_extractor=feature_extractor,
         skip_empty_check=skip_empty_check  # **Pass the parameter**
     )
+
+    if len(dataset) == 0:
+        raise ValueError("Cannot create DataLoader with an empty dataset.")
 
     return DataLoader(
         dataset,

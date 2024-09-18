@@ -449,7 +449,8 @@ def test_get_dataloader_empty_dataset(sample_data_dir, mock_coco, mock_cv2_imrea
         feature_extractor=None,
         dataset_type='coco',
         num_workers=0,
-        pin_memory=False
+        pin_memory=False,
+        skip_empty_check=True
     )
 
     # Since the dataset is empty, the DataLoader should have zero batches
@@ -469,12 +470,12 @@ def test_get_dataloader_reproducibility(sample_data_dir, mock_coco, mock_cv2_imr
     with patch('src.data.dataloader.DataAugmentor') as MockAugmentor:
         mock_augmentor = MockAugmentor.return_value
         mock_augmentor.apply_augmentation.side_effect = lambda image, bboxes, category_ids: {
-            'image': image.clone(),  # Assuming image is a torch.Tensor
+            'image': image.copy(),  # **Changed from image.clone() to image.copy()**
             'bboxes': bboxes.copy(),
             'category_ids': category_ids.copy()
         }
 
-        # Mock cv2.imread to return a torch.Tensor image
+        # Mock cv2.imread to return a numpy array image
         with patch('src.data.dataloader.cv2.imread') as mock_imread:
             mock_imread.return_value = np.zeros((224, 224, 3), dtype=np.uint8)
 
@@ -485,7 +486,8 @@ def test_get_dataloader_reproducibility(sample_data_dir, mock_coco, mock_cv2_imr
                 feature_extractor=None,
                 dataset_type='coco',
                 num_workers=0,
-                pin_memory=False
+                pin_memory=False,
+                skip_empty_check=True
             )
             dataloader2 = get_dataloader(
                 data_dir=str(sample_data_dir),
@@ -494,7 +496,8 @@ def test_get_dataloader_reproducibility(sample_data_dir, mock_coco, mock_cv2_imr
                 feature_extractor=None,
                 dataset_type='coco',
                 num_workers=0,
-                pin_memory=False
+                pin_memory=False,
+                skip_empty_check=True
             )
 
             # Mock COCO to have one image
@@ -511,5 +514,6 @@ def test_get_dataloader_reproducibility(sample_data_dir, mock_coco, mock_cv2_imr
                 images2, targets2 = batch2
                 assert torch.equal(images1, images2), "Images should be identical across dataloaders with the same seed."
                 assert targets1 == targets2, "Targets should be identical across dataloaders with the same seed."
+
 
 

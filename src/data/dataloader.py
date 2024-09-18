@@ -34,7 +34,7 @@ class CocoDataset(Dataset):
             feature_extractor (Callable, optional): Feature extractor to preprocess images.
         """
         self.img_dir = img_dir
-        self.ann_file = ann_file  # **Added this line**
+        self.ann_file = ann_file
         self.coco = COCO(ann_file)
         self.image_ids = list(self.coco.imgs.keys())
         self.transforms = transforms
@@ -62,7 +62,6 @@ class CocoDataset(Dataset):
 
         # Apply augmentations if provided
         if self.transforms:
-            # **Changed to use keyword arguments and pass image as numpy array**
             augmented = self.transforms.apply_augmentation(
                 image=image,
                 bboxes=bboxes,
@@ -71,17 +70,16 @@ class CocoDataset(Dataset):
             image = augmented['image']
             bboxes = augmented['bboxes']
             category_ids = augmented['category_ids']
-        else:
-            # Convert image to tensor
-            image = ToTensorV2()(image=image)['image']
 
-        # **Added feature extractor invocation with images as list**
+        # Feature extractor processing
         if self.feature_extractor is not None:
-            # Pass image as a list (expected by feature_extractor)
-            image = self.feature_extractor(images=[image], return_tensors="pt")['pixel_values'].squeeze()
+            # Pass image as a list of NumPy arrays to the feature extractor
+            # Ensures compatibility with mocks and expected input types
+            image = self.feature_extractor(images=[image], return_tensors="pt")['pixel_values'].squeeze(0)
         else:
-            # Convert image to tensor and permute dimensions
-            image = torch.tensor(image).permute(2, 0, 1)
+            # Convert image to tensor without unnecessary copying
+            # Use torch.from_numpy to avoid warnings and ensure efficient conversion
+            image = torch.from_numpy(image).permute(2, 0, 1).float()  # Shape: [C, H, W]
 
         # Prepare target
         target = {}
@@ -159,7 +157,7 @@ def get_dataset(
     mode: str,
     transforms: Optional[DataAugmentor] = None,
     feature_extractor: Optional[Callable] = None,
-    skip_empty_check: bool = False  # **Added this parameter**
+    skip_empty_check: bool = False  # New argument
 ) -> Dataset:
     """
     Returns the appropriate dataset based on the dataset type.
@@ -174,6 +172,9 @@ def get_dataset(
 
     Returns:
         Dataset: A dataset object.
+
+    Raises:
+        ValueError: If the dataset type is unsupported or the dataset is empty (when not skipped).
     """
     if dataset_type == 'coco':
         ann_file = os.path.join(data_dir, f'annotations/instances_{mode}2017.json')
@@ -189,7 +190,7 @@ def get_dataset(
             feature_extractor=feature_extractor
         )
 
-        # **Added check for empty dataset**
+        # Skip check for test environments
         if not skip_empty_check and len(dataset) == 0:
             raise ValueError("Dataset is empty.")
 
@@ -223,6 +224,9 @@ def get_dataloader(
 
     Returns:
         DataLoader: DataLoader for the specified dataset.
+
+    Raises:
+        ValueError: If the dataset is empty and `skip_empty_check` is False.
     """
     assert mode in ['train', 'val'], "Mode should be either 'train' or 'val'."
 
@@ -240,9 +244,6 @@ def get_dataloader(
         feature_extractor=feature_extractor,
         skip_empty_check=skip_empty_check  # **Pass the parameter**
     )
-
-    if len(dataset) == 0:
-        raise ValueError("Cannot create DataLoader with an empty dataset.")
 
     return DataLoader(
         dataset,

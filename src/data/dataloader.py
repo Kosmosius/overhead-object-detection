@@ -35,6 +35,7 @@ class CocoDataset(Dataset):
             feature_extractor (Callable, optional): Feature extractor to preprocess images.
         """
         self.img_dir = img_dir
+        self.ann_file = ann_file  # **Added this line**
         self.coco = COCO(ann_file)
         self.image_ids = list(self.coco.imgs.keys())
         self.transforms = transforms
@@ -62,13 +63,23 @@ class CocoDataset(Dataset):
 
         # Apply augmentations if provided
         if self.transforms:
-            augmented = self.transforms.apply_augmentation(image, bboxes, category_ids)
+            # **Changed to use keyword arguments**
+            augmented = self.transforms.apply_augmentation(
+                image=image,
+                bboxes=bboxes,
+                category_ids=category_ids
+            )
             image = augmented['image']
             bboxes = augmented['bboxes']
             category_ids = augmented['category_ids']
         else:
             # Convert image to tensor
             image = ToTensorV2()(image=image)['image']
+
+        # **Added feature extractor invocation**
+        if self.feature_extractor is not None:
+            # Assuming feature_extractor returns a dict with 'pixel_values' key
+            image = self.feature_extractor(image=image, return_tensors="pt")['pixel_values'].squeeze()
 
         # Prepare target
         target = {}
@@ -167,12 +178,18 @@ def get_dataset(
         # Validate paths
         validate_data_paths(data_dir, ann_file, img_dir)
 
-        return CocoDataset(
+        dataset = CocoDataset(
             img_dir=img_dir,
             ann_file=ann_file,
             transforms=transforms,
             feature_extractor=feature_extractor
         )
+
+        # **Added check for empty dataset**
+        if len(dataset) == 0:
+            raise ValueError("Dataset is empty.")
+
+        return dataset
     else:
         raise ValueError(f"Dataset type '{dataset_type}' is not supported.")
 

@@ -250,7 +250,7 @@ def test_coco_dataset_with_feature_extractor(sample_image, sample_bboxes, sample
     image, target = dataset[0]
 
     # Assertions on image
-    mock_feature_extractor.assert_called_once_with(image=sample_image, return_tensors="pt")
+    mock_feature_extractor.assert_called_once_with(images=[sample_image], return_tensors="pt")
     assert isinstance(image, torch.Tensor), "Image should be a torch.Tensor."
     assert image.shape == (3, 224, 224), "Image tensor shape mismatch."
 
@@ -501,7 +501,10 @@ def test_get_dataloader_reproducibility(sample_data_dir, mock_coco, mock_cv2_imr
             )
 
             # Mock COCO to have one image
-            mock_coco.imgs = {1: {'file_name': 'image1.jpg'}}
+            mock_coco.imgs = {
+                1: {'file_name': 'image1.jpg'},
+                2: {'file_name': 'image2.jpg'}  # Add image_id=2
+            }
             mock_coco.getAnnIds.return_value = [1]
             mock_coco.loadAnns.return_value = [
                 {'bbox': [50, 50, 100, 100], 'category_id': 1},

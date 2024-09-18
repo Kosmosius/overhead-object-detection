@@ -9,7 +9,7 @@ This repository is structured to facilitate ease of use, scalability, and mainta
 ## Repository structure
 
 ```
-rare-objects-ultimatum/
+overhead-object-detection/
 ├── .github/
 │   ├── issue_template/                 # Folder for issue templates to standardize issue reporting
 │   │ ├── bug_report.md                 # Template for reporting bugs

@@ -3,7 +3,6 @@
 import os
 import logging
 from torch.utils.data import DataLoader, Dataset
-from torchvision.datasets import CocoDetection
 from pycocotools.coco import COCO
 import cv2
 import torch
@@ -63,7 +62,7 @@ class CocoDataset(Dataset):
 
         # Apply augmentations if provided
         if self.transforms:
-            # **Changed to use keyword arguments**
+            # **Changed to use keyword arguments and pass image as numpy array**
             augmented = self.transforms.apply_augmentation(
                 image=image,
                 bboxes=bboxes,
@@ -76,10 +75,11 @@ class CocoDataset(Dataset):
             # Convert image to tensor
             image = ToTensorV2()(image=image)['image']
 
-        # **Added feature extractor invocation**
+        # **Added feature extractor invocation with images as list**
         if self.feature_extractor is not None:
-            # Assuming feature_extractor returns a dict with 'pixel_values' key
-            image = self.feature_extractor(image=image, return_tensors="pt")['pixel_values'].squeeze()
+            # Assuming feature_extractor expects images as a list
+            # and returns 'pixel_values' with shape (batch_size, 3, 224, 224)
+            image = self.feature_extractor(images=[image], return_tensors="pt")['pixel_values'].squeeze(0)
 
         # Prepare target
         target = {}
@@ -156,7 +156,8 @@ def get_dataset(
     data_dir: str,
     mode: str,
     transforms: Optional[DataAugmentor] = None,
-    feature_extractor: Optional[Callable] = None
+    feature_extractor: Optional[Callable] = None,
+    skip_empty_check: bool = False  # **Added this parameter**
 ) -> Dataset:
     """
     Returns the appropriate dataset based on the dataset type.
@@ -167,6 +168,7 @@ def get_dataset(
         mode (str): Mode of the dataset ('train' or 'val').
         transforms (DataAugmentor, optional): DataAugmentor instance for applying augmentations.
         feature_extractor (Callable, optional): Feature extractor to preprocess images.
+        skip_empty_check (bool): Whether to skip checking if the dataset is empty.
 
     Returns:
         Dataset: A dataset object.
@@ -186,7 +188,7 @@ def get_dataset(
         )
 
         # **Added check for empty dataset**
-        if len(dataset) == 0:
+        if not skip_empty_check and len(dataset) == 0:
             raise ValueError("Dataset is empty.")
 
         return dataset
@@ -201,7 +203,8 @@ def get_dataloader(
     feature_extractor: Optional[Callable] = None,
     dataset_type: str = 'coco',
     num_workers: int = 4,
-    pin_memory: bool = True
+    pin_memory: bool = True,
+    skip_empty_check: bool = False  # **Added this parameter**
 ) -> DataLoader:
     """
     Returns a DataLoader for the specified dataset.
@@ -214,6 +217,7 @@ def get_dataloader(
         dataset_type (str): The type of dataset (default is 'coco').
         num_workers (int): Number of worker processes for data loading.
         pin_memory (bool): Whether to pin memory in data loader.
+        skip_empty_check (bool): Whether to skip checking if the dataset is empty.
 
     Returns:
         DataLoader: DataLoader for the specified dataset.
@@ -231,7 +235,8 @@ def get_dataloader(
         data_dir=data_dir,
         mode=mode,
         transforms=transforms,
-        feature_extractor=feature_extractor
+        feature_extractor=feature_extractor,
+        skip_empty_check=skip_empty_check  # **Pass the parameter**
     )
 
     return DataLoader(

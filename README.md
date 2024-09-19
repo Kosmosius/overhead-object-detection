@@ -6,7 +6,7 @@ Welcome to the `overhead-object-detection` Repository. This repository is design
 
 This repository is structured to facilitate ease of use, scalability, and maintainability, ensuring that both individual developers and teams can efficiently contribute and leverage its capabilities.
 
-## Repository structure
+## Repository structure (out of date)
 
 ```
 overhead-object-detection/

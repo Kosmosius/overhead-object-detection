@@ -43,21 +43,14 @@ def sample_targets():
         },
     ]
 
-class MockModel(torch.nn.Module):
-    """A mock model to simulate torch.nn.Module behavior with customizable forward method."""
-    def __init__(self):
-        super(MockModel, self).__init__()
-        self.to = MagicMock(return_value=self)  # Mock the .to() method
-        self.eval = MagicMock(return_value=None)  # Mock the .eval() method
-    
-    def forward(self, images):
-        # Default behavior; can be overridden in tests
-        return []
-
 @pytest.fixture
 def mock_model():
     """Fixture to return a mock PyTorch model."""
-    return MockModel()
+    # Create a MagicMock with spec to ensure it mimics torch.nn.Module
+    model = MagicMock(spec=torch.nn.Module)
+    model.to.return_value = model  # Ensure .to() returns the model itself
+    model.eval.return_value = None  # Ensure .eval() is callable
+    return model
 
 @pytest.fixture
 def mock_evaluate_model():
@@ -217,7 +210,7 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
     """Test the evaluate method when all predictions are below the confidence threshold."""
     evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.9)
     
-    # Modify the mock_model to return low scores
+    # Define a side effect function that returns outputs with low scores
     def mock_forward_low_scores(images):
         outputs = []
         for idx, img in enumerate(images):
@@ -234,10 +227,9 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
             })
         return outputs
 
-    # Set the side effect correctly
-    mock_model.forward.side_effect = mock_forward_low_scores
-
-    metrics = evaluator.evaluate(mock_dataloader)
+    # Set the side effect for the __call__ method
+    with patch.object(mock_model, '__call__', side_effect=mock_forward_low_scores):
+        metrics = evaluator.evaluate(mock_dataloader)
 
     # All predictions should be filtered out
     all_predictions = []
@@ -266,28 +258,23 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
 # Test evaluate with missing fields in outputs
 def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_evaluate_model):
     """Test the evaluate method when model outputs are missing fields."""
-    evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
-    
     # Define a side effect function that omits the 'scores' key
     def mock_forward_missing_fields(images):
         outputs = []
         for idx, img in enumerate(images):
-            num_preds = torch.randint(1, 3, (1,)).item()
-            boxes = torch.rand(num_preds, 4) * 200
-            labels = torch.randint(1, 10, (num_preds,))
-            image_id = torch.tensor(idx + 1, dtype=torch.int64)
             outputs.append({
                 # 'scores' key is intentionally missing
-                'boxes': boxes,
-                'labels': labels,
-                'image_id': image_id
+                'boxes': torch.rand(1, 4),
+                'labels': torch.randint(1, 10, (1,)),
+                'image_id': torch.tensor(idx + 1, dtype=torch.int64)
             })
         return outputs
 
-    # Set the side effect for the forward method using patch.object
-    with patch.object(mock_model, 'forward', side_effect=mock_forward_missing_fields):
+    # Set the side effect for the __call__ method
+    with patch.object(mock_model, '__call__', side_effect=mock_forward_missing_fields):
         # Expect a KeyError when 'scores' key is missing
         with pytest.raises(KeyError, match="Model output missing required keys: \['scores'\]"):
+            evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
             evaluator.evaluate(mock_dataloader)
 
     # Ensure evaluate_model was not called due to the exception
@@ -307,5 +294,9 @@ def test_evaluator_evaluate_reproducibility(mock_model, mock_dataloader, mock_ev
     assert metrics1 == metrics2, "Metrics should be identical across evaluations with the same model and data."
 
     # Ensure that logging happened correctly for both evaluators
-    assert "Evaluator initialized with model on device 'cpu'." in caplog.text, "Initialization log not captured in reproducibility test."
-    assert "Evaluation completed. Metrics: {'mAP': 0.75, 'precision': 0.8, 'recall': 0.7, 'f1_score': 0.75}" in caplog.text, "Evaluation completion log not captured in reproducibility test."
+    # Since both evaluators log their initialization and evaluation, both should be present
+    init_log_count = caplog.text.count("Evaluator initialized with model on device 'cpu'.")
+    eval_log_count = caplog.text.count("Evaluation completed. Metrics: {'mAP': 0.75, 'precision': 0.8, 'recall': 0.7, 'f1_score': 0.75}")
+    
+    assert init_log_count == 2, "Initialization log should appear twice for two evaluators."
+    assert eval_log_count == 2, "Evaluation completion log should appear twice for two evaluations."

@@ -14,18 +14,18 @@ class Evaluator:
 
     def __init__(self, model: torch.nn.Module, device: str = 'cuda', confidence_threshold: float = 0.5):
         """
-        Initialize the Evaluator.
+        Initialize the Evaluator with a model and device.
 
         Args:
-            model (torch.nn.Module): The object detection model to evaluate.
-            device (str): Device to run the evaluation on ('cuda' or 'cpu').
-            confidence_threshold (float): Confidence threshold to filter predictions.
+            model (torch.nn.Module): The model to evaluate.
+            device (str): Device to run evaluation on ('cuda' or 'cpu').
+            confidence_threshold (float): Confidence threshold for filtering predictions.
         """
         self.model = model.to(device)
         self.device = device
         self.confidence_threshold = confidence_threshold
         self.model.eval()
-        logging.info(f"Evaluator initialized with model on device '{self.device}'.")
+        logger.info(f"Evaluator initialized with model on device '{device}'.")
 
     def evaluate(self, dataloader: torch.utils.data.DataLoader) -> Dict[str, float]:
         """
@@ -44,79 +44,77 @@ class Evaluator:
             for images, targets in tqdm(dataloader, desc="Evaluating"):
                 # Move images and targets to the device
                 images = [img.to(self.device) for img in images]
-                targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
+                try:
+                    targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
+                except AttributeError as e:
+                    logger.error(f"Error moving targets to device: {e}")
+                    raise
 
-                # Forward pass
+                # Get model outputs
                 outputs = self.model(images)
 
                 # Process outputs and targets
                 batch_predictions = self._process_outputs(outputs)
                 batch_ground_truths = self._process_targets(targets)
 
-                # Append to lists
+                # Accumulate predictions and ground truths
                 all_predictions.extend(batch_predictions)
                 all_ground_truths.extend(batch_ground_truths)
 
-        # Compute metrics using the consolidated module
+        # Compute evaluation metrics
         metrics = evaluate_model(all_predictions, all_ground_truths)
-
-        logging.info(f"Evaluation completed. Metrics: {metrics}")
+        logger.info(f"Evaluation completed. Metrics: {metrics}")
         return metrics
 
-    def _process_outputs(self, outputs: List[Dict[str, Any]]) -> List[Dict[str, torch.Tensor]]:
+    def _process_outputs(self, outputs: List[Dict[str, torch.Tensor]]) -> List[Dict[str, torch.Tensor]]:
         """
-        Process model outputs to extract predictions.
+        Process model outputs to filter based on confidence threshold.
 
         Args:
-            outputs (List[Dict[str, Any]]): Raw outputs from the model.
+            outputs (List[Dict[str, torch.Tensor]]): Model outputs.
 
         Returns:
-            List[Dict[str, torch.Tensor]]: Processed predictions.
+            List[Dict[str, torch.Tensor]]: Filtered predictions.
         """
-        processed_predictions = []
-
+        processed_outputs = []
         for output in outputs:
-            # Apply confidence threshold
+            required_keys = ['scores', 'boxes', 'labels', 'image_id']
+            if not all(key in output for key in required_keys):
+                logger.error("Model output missing required keys.")
+                raise KeyError("Model output missing required keys.")
+
             scores = output['scores']
             keep = scores >= self.confidence_threshold
-
-            # Extract boxes, labels, and scores
-            boxes = output['boxes'][keep].detach().cpu()
-            labels = output['labels'][keep].detach().cpu()
-            scores = scores[keep].detach().cpu()
-
-            prediction = {
-                'boxes': boxes,
-                'labels': labels,
-                'scores': scores,
-                # Include image_id if available
-                'image_id': output.get('image_id', torch.tensor(-1)).detach().cpu()
+            filtered_output = {
+                'boxes': output['boxes'][keep],
+                'scores': scores[keep],
+                'labels': output['labels'][keep],
+                'image_id': output['image_id']
             }
+            processed_outputs.append(filtered_output)
+        return processed_outputs
 
-            processed_predictions.append(prediction)
-
-        return processed_predictions
-
-    def _process_targets(self, targets: List[Dict[str, Any]]) -> List[Dict[str, torch.Tensor]]:
+    def _process_targets(self, targets: List[Dict[str, torch.Tensor]]) -> List[Dict[str, torch.Tensor]]:
         """
-        Process targets to extract ground truth annotations.
+        Process ground truth targets.
 
         Args:
-            targets (List[Dict[str, Any]]): Targets from the dataloader.
+            targets (List[Dict[str, torch.Tensor]]): Ground truth targets.
 
         Returns:
             List[Dict[str, torch.Tensor]]: Processed ground truths.
         """
         processed_targets = []
-
         for target in targets:
-            ground_truth = {
-                'boxes': target['boxes'].detach().cpu(),
-                'labels': target['labels'].detach().cpu(),
-                # Include image_id if available
-                'image_id': target.get('image_id', torch.tensor(-1)).detach().cpu()
+            required_keys = ['boxes', 'labels', 'image_id']
+            if not all(key in target for key in required_keys):
+                logger.error("Target missing required keys.")
+                raise KeyError("Target missing required keys.")
+
+            processed_target = {
+                'boxes': target['boxes'],
+                'labels': target['labels'],
+                'image_id': target['image_id']
             }
-
-            processed_targets.append(ground_truth)
-
+            processed_targets.append(processed_target)
         return processed_targets

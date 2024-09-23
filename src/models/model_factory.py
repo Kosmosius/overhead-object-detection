@@ -64,18 +64,9 @@ class BaseModel(ABC):
             with open(metadata_path, 'w') as f:
                 json.dump(metadata, f, indent=4)
             logger.info(f"Metadata saved to {metadata_path}")
-
+    
     @classmethod
     def load(cls, load_directory: str) -> 'BaseModel':
-        """
-        Load the model from the specified directory, along with metadata if available.
-    
-        Args:
-            load_directory (str): Directory to load the model from.
-    
-        Returns:
-            BaseModel: An instance of the loaded model.
-        """
         try:
             config = AutoConfig.from_pretrained(load_directory)
             model_class = MODEL_REGISTRY.get(config.model_type)
@@ -98,8 +89,7 @@ class BaseModel(ABC):
             return model
         except Exception as e:
             logger.error(f"Error loading model from {load_directory}: {e}")
-            raise Exception(f"Error loading model from {load_directory}: {e}")
-
+            raise  # Re-raise the original exception
 
     def freeze_backbone(self) -> None:
         """

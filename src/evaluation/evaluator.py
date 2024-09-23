@@ -8,6 +8,17 @@ from src.utils.metrics import evaluate_model
 
 # Initialize the logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Prevent adding multiple handlers if already present
+if not logger.hasHandlers():
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(levelname)s %(name)s:%(lineno)d %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+# Ensure logs propagate to the root logger
+logger.propagate = True
 
 class Evaluator:
     def __init__(self, model: torch.nn.Module, device: str = 'cuda', confidence_threshold: float = 0.5):

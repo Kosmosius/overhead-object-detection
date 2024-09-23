@@ -3,15 +3,13 @@
 import torch
 import logging
 from tqdm import tqdm
-from typing import List, Dict, Any
+from typing import List, Dict
 from src.utils.metrics import evaluate_model
 
-class Evaluator:
-    """
-    Class for evaluating object detection models.
-    Computes metrics such as mAP, precision, recall, and F1 score using the consolidated metrics module.
-    """
+# Initialize the logger
+logger = logging.getLogger(__name__)
 
+class Evaluator:
     def __init__(self, model: torch.nn.Module, device: str = 'cuda', confidence_threshold: float = 0.5):
         """
         Initialize the Evaluator with a model and device.
@@ -41,30 +39,38 @@ class Evaluator:
         all_ground_truths = []
 
         with torch.no_grad():
-            for images, targets in tqdm(dataloader, desc="Evaluating"):
+            for batch_idx, (images, targets) in enumerate(tqdm(dataloader, desc="Evaluating")):
                 # Move images and targets to the device
-                images = [img.to(self.device) for img in images]
                 try:
+                    images = [img.to(self.device) for img in images]
                     targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
                 except AttributeError as e:
-                    logger.error(f"Error moving targets to device: {e}")
+                    logger.error(f"Error moving data to device: {e}")
                     raise
 
                 # Get model outputs
                 outputs = self.model(images)
 
                 # Process outputs and targets
-                batch_predictions = self._process_outputs(outputs)
-                batch_ground_truths = self._process_targets(targets)
+                try:
+                    batch_predictions = self._process_outputs(outputs)
+                    batch_ground_truths = self._process_targets(targets)
+                except KeyError as e:
+                    logger.error(f"Error processing outputs or targets: {e}")
+                    raise
 
                 # Accumulate predictions and ground truths
                 all_predictions.extend(batch_predictions)
                 all_ground_truths.extend(batch_ground_truths)
 
         # Compute evaluation metrics
-        metrics = evaluate_model(all_predictions, all_ground_truths)
-        logger.info(f"Evaluation completed. Metrics: {metrics}")
-        return metrics
+        try:
+            metrics = evaluate_model(all_predictions, all_ground_truths)
+            logger.info(f"Evaluation completed. Metrics: {metrics}")
+            return metrics
+        except Exception as e:
+            logger.error(f"Error computing evaluation metrics: {e}")
+            raise
 
     def _process_outputs(self, outputs: List[Dict[str, torch.Tensor]]) -> List[Dict[str, torch.Tensor]]:
         """
@@ -77,11 +83,11 @@ class Evaluator:
             List[Dict[str, torch.Tensor]]: Filtered predictions.
         """
         processed_outputs = []
-        for output in outputs:
+        for output_idx, output in enumerate(outputs):
             required_keys = ['scores', 'boxes', 'labels', 'image_id']
             if not all(key in output for key in required_keys):
-                logger.error("Model output missing required keys.")
-                raise KeyError("Model output missing required keys.")
+                logger.error(f"Model output at index {output_idx} missing required keys: {required_keys}")
+                raise KeyError(f"Model output missing required keys: {required_keys}")
 
             scores = output['scores']
             keep = scores >= self.confidence_threshold
@@ -92,6 +98,7 @@ class Evaluator:
                 'image_id': output['image_id']
             }
             processed_outputs.append(filtered_output)
+        logger.debug(f"Processed outputs: {processed_outputs}")
         return processed_outputs
 
     def _process_targets(self, targets: List[Dict[str, torch.Tensor]]) -> List[Dict[str, torch.Tensor]]:
@@ -105,11 +112,11 @@ class Evaluator:
             List[Dict[str, torch.Tensor]]: Processed ground truths.
         """
         processed_targets = []
-        for target in targets:
+        for target_idx, target in enumerate(targets):
             required_keys = ['boxes', 'labels', 'image_id']
             if not all(key in target for key in required_keys):
-                logger.error("Target missing required keys.")
-                raise KeyError("Target missing required keys.")
+                logger.error(f"Target at index {target_idx} missing required keys: {required_keys}")
+                raise KeyError(f"Target missing required keys: {required_keys}")
 
             processed_target = {
                 'boxes': target['boxes'],
@@ -117,4 +124,5 @@ class Evaluator:
                 'image_id': target['image_id']
             }
             processed_targets.append(processed_target)
+        logger.debug(f"Processed targets: {processed_targets}")
         return processed_targets

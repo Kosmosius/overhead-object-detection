@@ -45,6 +45,7 @@ def mock_model():
     model = MagicMock(spec=torch.nn.Module)
     model.to.return_value = model  # Ensure .to() returns the model itself
     model.eval.return_value = None  # Ensure .eval() is callable
+
     # Mock model outputs: list of dicts with 'scores', 'boxes', 'labels', 'image_id'
     def mock_forward(images):
         # For simplicity, return a list with one output per image
@@ -62,7 +63,9 @@ def mock_model():
                 'image_id': image_id
             })
         return outputs
-    model.__call__.side_effect = mock_forward
+
+    # Set model.forward to a MagicMock with the side_effect
+    model.forward = MagicMock(side_effect=mock_forward)
     return model
 
 @pytest.fixture
@@ -240,7 +243,7 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
                 'image_id': image_id
             })
         return outputs
-    mock_model.__call__.side_effect = mock_forward_low_scores
+    mock_model.forward.side_effect = mock_forward_low_scores
     
     metrics = evaluator.evaluate(mock_dataloader)
     
@@ -288,7 +291,7 @@ def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_eva
                 'image_id': image_id
             })
         return outputs
-    mock_model.__call__.side_effect = mock_forward_missing_fields
+    mock_model.forward.side_effect = mock_forward_missing_fields
     
     with pytest.raises(KeyError):
         evaluator.evaluate(mock_dataloader)

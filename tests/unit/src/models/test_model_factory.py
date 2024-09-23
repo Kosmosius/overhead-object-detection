@@ -10,7 +10,7 @@ from src.models.model_factory import (
     ModelVersioning,
     ModelFactory
 )
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, DetrConfig
 import os
 import json
 import shutil
@@ -467,25 +467,25 @@ def test_model_versioning_register_existing_version(mock_pretrained_model, tempo
 def test_base_model_load_unregistered_model(mock_pretrained_model, temporary_model_dir):
     """Test that loading a model with an unregistered model type raises an error."""
     mock_detr, mock_model_instance = mock_pretrained_model
-    
+
     # Create a dummy config with an unregistered model_type
-    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config:
+    with patch('transformers.AutoConfig.from_pretrained') as mock_auto_config:
         mock_config = MagicMock()
         mock_config.model_type = 'unregistered_model_type'
         mock_auto_config.return_value = mock_config
-        
-        with pytest.raises(ValueError) as exc_info:
-            BaseModel.load(str(temporary_model_dir))
-        
-        assert "Model type 'unregistered_model_type' is not registered." in str(exc_info.value), "Incorrect error message for unregistered model type."
 
+        with pytest.raises(ValueError, match="Model type 'unregistered_model_type' is not registered."):
+            BaseModel.load(str(temporary_model_dir))
 
 def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model_dir):
     """Test loading a model without metadata."""
     mock_detr, mock_model_instance = mock_pretrained_model
 
+    # Ensure the temporary model directory exists
+    os.makedirs(temporary_model_dir, exist_ok=True)
+
     # Mock the presence of model files but absence of metadata
-    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config, \
+    with patch('transformers.AutoConfig.from_pretrained') as mock_auto_config, \
          patch.dict('src.models.model_factory.MODEL_REGISTRY', {'detr': DetrModel}), \
          patch.object(DetrModel, 'load') as mock_load:
 
@@ -494,10 +494,10 @@ def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model
         mock_config.num_labels = 91
         mock_auto_config.return_value = mock_config
 
-        mock_load.return_value = DetrModel.load(str(temporary_model_dir))
+        mock_load.return_value = DetrModel(model_name='', num_labels=91)
 
         # Ensure metadata.json does not exist
-        with patch('os.path.exists', return_value=False):
+        with patch('os.path.exists', side_effect=lambda x: False if 'metadata.json' in x else True):
             model = BaseModel.load(str(temporary_model_dir))
 
         mock_load.assert_called_once_with(str(temporary_model_dir))
@@ -509,7 +509,7 @@ def test_base_model_load_corrupted_metadata(mock_pretrained_model, temporary_mod
     mock_detr, mock_model_instance = mock_pretrained_model
 
     # Mock the presence of model files and corrupted metadata
-    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config, \
+    with patch('transformers.AutoConfig.from_pretrained') as mock_auto_config, \
          patch.dict('src.models.model_factory.MODEL_REGISTRY', {'detr': DetrModel}), \
          patch.object(DetrModel, 'load') as mock_load, \
          patch('builtins.open', mock_open(read_data='corrupted json')):

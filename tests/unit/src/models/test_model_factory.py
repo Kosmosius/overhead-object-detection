@@ -8,8 +8,7 @@ from src.models.model_factory import (
     MODEL_REGISTRY,
     register_model,
     ModelVersioning,
-    ModelFactory,
-    DatasetNotSupportedError
+    ModelFactory
 )
 from transformers import PreTrainedModel
 import os

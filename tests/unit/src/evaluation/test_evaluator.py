@@ -2,7 +2,7 @@
 
 import pytest
 import torch
-import logging
+import logging  # Import logging
 from unittest.mock import MagicMock, patch
 from src.evaluation.evaluator import Evaluator
 from torch.utils.data import DataLoader
@@ -111,16 +111,16 @@ def test_evaluator_process_outputs(mock_model):
     # Define mock outputs
     mock_outputs = [
         {
-            'scores': torch.tensor([0.6, 0.4]),
+            'scores': torch.tensor([0.6, 0.4], dtype=torch.float32),
             'boxes': torch.tensor([[50, 50, 150, 150], [30, 30, 100, 100]], dtype=torch.float32),
             'labels': torch.tensor([1, 2], dtype=torch.int64),
-            'image_id': torch.tensor([1], dtype=torch.int64)
+            'image_id': torch.tensor(1, dtype=torch.int64)
         },
         {
-            'scores': torch.tensor([0.7]),
+            'scores': torch.tensor([0.7], dtype=torch.float32),
             'boxes': torch.tensor([[60, 60, 160, 160]], dtype=torch.float32),
             'labels': torch.tensor([3], dtype=torch.int64),
-            'image_id': torch.tensor([2], dtype=torch.int64)
+            'image_id': torch.tensor(2, dtype=torch.int64)
         }
     ]
     
@@ -129,16 +129,16 @@ def test_evaluator_process_outputs(mock_model):
     assert len(processed) == 2, "Processed predictions length mismatch."
     
     # First prediction
-    assert torch.allclose(processed[0]['scores'], torch.tensor([0.6])), "Scores filtering mismatch."
-    assert torch.allclose(processed[0]['boxes'], torch.tensor([[50, 50, 150, 150]])), "Boxes filtering mismatch."
-    assert torch.allclose(processed[0]['labels'], torch.tensor([1])), "Labels filtering mismatch."
-    assert torch.allclose(processed[0]['image_id'], torch.tensor([1])), "Image ID mismatch."
+    assert torch.allclose(processed[0]['scores'], torch.tensor([0.6], dtype=torch.float32)), "Scores filtering mismatch."
+    assert torch.allclose(processed[0]['boxes'], torch.tensor([[50, 50, 150, 150]], dtype=torch.float32)), "Boxes filtering mismatch."
+    assert torch.allclose(processed[0]['labels'], torch.tensor([1], dtype=torch.int64)), "Labels filtering mismatch."
+    assert torch.allclose(processed[0]['image_id'], torch.tensor(1, dtype=torch.int64)), "Image ID mismatch."
     
     # Second prediction
-    assert torch.allclose(processed[1]['scores'], torch.tensor([0.7])), "Scores filtering mismatch."
-    assert torch.allclose(processed[1]['boxes'], torch.tensor([[60, 60, 160, 160]])), "Boxes filtering mismatch."
-    assert torch.allclose(processed[1]['labels'], torch.tensor([3])), "Labels filtering mismatch."
-    assert torch.allclose(processed[1]['image_id'], torch.tensor([2])), "Image ID mismatch."
+    assert torch.allclose(processed[1]['scores'], torch.tensor([0.7], dtype=torch.float32)), "Scores filtering mismatch."
+    assert torch.allclose(processed[1]['boxes'], torch.tensor([[60, 60, 160, 160]], dtype=torch.float32)), "Boxes filtering mismatch."
+    assert torch.allclose(processed[1]['labels'], torch.tensor([3], dtype=torch.int64)), "Labels filtering mismatch."
+    assert torch.allclose(processed[1]['image_id'], torch.tensor(2, dtype=torch.int64)), "Image ID mismatch."
 
 # Test _process_targets
 def test_evaluator_process_targets(mock_model):
@@ -150,12 +150,12 @@ def test_evaluator_process_targets(mock_model):
         {
             'boxes': torch.tensor([[50, 50, 150, 150], [30, 30, 100, 100]], dtype=torch.float32),
             'labels': torch.tensor([1, 2], dtype=torch.int64),
-            'image_id': torch.tensor([1], dtype=torch.int64)
+            'image_id': torch.tensor(1, dtype=torch.int64)
         },
         {
             'boxes': torch.tensor([[60, 60, 160, 160]], dtype=torch.float32),
             'labels': torch.tensor([3], dtype=torch.int64),
-            'image_id': torch.tensor([2], dtype=torch.int64)
+            'image_id': torch.tensor(2, dtype=torch.int64)
         }
     ]
     
@@ -164,14 +164,14 @@ def test_evaluator_process_targets(mock_model):
     assert len(processed) == 2, "Processed ground truths length mismatch."
     
     # First ground truth
-    assert torch.allclose(processed[0]['boxes'], torch.tensor([[50, 50, 150, 150], [30, 30, 100, 100]])), "Boxes mismatch."
-    assert torch.allclose(processed[0]['labels'], torch.tensor([1, 2])), "Labels mismatch."
-    assert torch.allclose(processed[0]['image_id'], torch.tensor([1])), "Image ID mismatch."
+    assert torch.allclose(processed[0]['boxes'], torch.tensor([[50, 50, 150, 150], [30, 30, 100, 100]], dtype=torch.float32)), "Boxes mismatch."
+    assert torch.allclose(processed[0]['labels'], torch.tensor([1, 2], dtype=torch.int64)), "Labels mismatch."
+    assert torch.allclose(processed[0]['image_id'], torch.tensor(1, dtype=torch.int64)), "Image ID mismatch."
     
     # Second ground truth
-    assert torch.allclose(processed[1]['boxes'], torch.tensor([[60, 60, 160, 160]])), "Boxes mismatch."
-    assert torch.allclose(processed[1]['labels'], torch.tensor([3])), "Labels mismatch."
-    assert torch.allclose(processed[1]['image_id'], torch.tensor([2])), "Image ID mismatch."
+    assert torch.allclose(processed[1]['boxes'], torch.tensor([[60, 60, 160, 160]], dtype=torch.float32)), "Boxes mismatch."
+    assert torch.allclose(processed[1]['labels'], torch.tensor([3], dtype=torch.int64)), "Labels mismatch."
+    assert torch.allclose(processed[1]['image_id'], torch.tensor(2, dtype=torch.int64)), "Image ID mismatch."
 
 # Test evaluate method
 def test_evaluator_evaluate(mock_model, mock_dataloader, mock_evaluate_model, caplog):
@@ -187,13 +187,13 @@ def test_evaluator_evaluate(mock_model, mock_dataloader, mock_evaluate_model, ca
     
     # Manually simulate what the evaluate method does
     for images, targets in mock_dataloader:
-        outputs = mock_model(images)
+        outputs = evaluator.model(images)
         batch_predictions = evaluator._process_outputs(outputs)
         batch_ground_truths = evaluator._process_targets(targets)
         all_predictions.extend(batch_predictions)
         all_ground_truths.extend(batch_ground_truths)
     
-    evaluate_model.assert_called_once_with(all_predictions, all_ground_truths)
+    mock_evaluate_model.assert_called_once_with(all_predictions, all_ground_truths)
     
     # Check that metrics are as mocked
     assert metrics == {
@@ -210,14 +210,14 @@ def test_evaluator_evaluate(mock_model, mock_dataloader, mock_evaluate_model, ca
 # Test evaluate with empty dataloader
 def test_evaluator_evaluate_empty_dataloader(mock_model, mock_evaluate_model):
     """Test the evaluate method with an empty dataloader."""
-    empty_dataloader = DataLoader([], batch_size=2)
+    empty_dataloader = DataLoader([], batch_size=2, collate_fn=collate_fn)
     evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
-    
+
     metrics = evaluator.evaluate(empty_dataloader)
-    
+
     # Since there are no predictions or ground truths, evaluate_model should be called with empty lists
-    evaluate_model.assert_called_once_with([], [])
-    
+    mock_evaluate_model.assert_called_once_with([], [])
+
     # Check that metrics are as mocked
     assert metrics == {
         'mAP': 0.75,
@@ -239,7 +239,7 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
             scores = torch.rand(num_preds) * 0.5  # All scores below 0.9
             boxes = torch.rand(num_preds, 4) * 200
             labels = torch.randint(1, 10, (num_preds,))
-            image_id = torch.tensor(idx + 1)
+            image_id = torch.tensor(idx + 1, dtype=torch.int64)
             outputs.append({
                 'scores': scores,
                 'boxes': boxes,
@@ -247,10 +247,12 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
                 'image_id': image_id
             })
         return outputs
+
+    # Adjust the mock_model.forward side_effect
     mock_model.forward.side_effect = mock_forward_low_scores
-    
+
     metrics = evaluator.evaluate(mock_dataloader)
-    
+
     # All predictions should be filtered out
     all_predictions = []
     all_ground_truths = []
@@ -260,13 +262,13 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
         batch_ground_truths = evaluator._process_targets(targets)
         all_predictions.extend(batch_predictions)
         all_ground_truths.extend(batch_ground_truths)
-    
-    # Since all predictions are below threshold, processed predictions should be empty
+
+    # Since all predictions are below threshold, processed predictions should have empty 'boxes'
     for pred in all_predictions:
         assert len(pred['boxes']) == 0, "There should be no boxes after filtering."
-    
-    evaluate_model.assert_called_once_with(all_predictions, all_ground_truths)
-    
+
+    mock_evaluate_model.assert_called_once_with(all_predictions, all_ground_truths)
+
     # Metrics should still be as mocked
     assert metrics == {
         'mAP': 0.75,
@@ -276,7 +278,7 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
     }, "Metrics do not match expected values when all predictions are below threshold."
 
 # Test evaluate with missing fields in outputs
-def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_evaluate_model):
+def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_evaluate_model, caplog):
     """Test the evaluate method when model outputs are missing fields."""
     evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
     
@@ -287,7 +289,7 @@ def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_eva
             num_preds = torch.randint(1, 3, (1,)).item()
             boxes = torch.rand(num_preds, 4) * 200
             labels = torch.randint(1, 10, (num_preds,))
-            image_id = torch.tensor(idx + 1)
+            image_id = torch.tensor(idx + 1, dtype=torch.int64)
             outputs.append({
                 # 'scores' key is missing
                 'boxes': boxes,
@@ -295,15 +297,17 @@ def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_eva
                 'image_id': image_id
             })
         return outputs
+
     mock_model.forward.side_effect = mock_forward_missing_fields
-    
-    with pytest.raises(KeyError):
+
+    with pytest.raises(KeyError, match="Model output missing required keys:"):
         evaluator.evaluate(mock_dataloader)
-    
-    evaluate_model.assert_not_called()
+
+    # evaluate_model should not be called due to the exception
+    mock_evaluate_model.assert_not_called()
 
 # Test evaluate with incomplete targets
-def test_evaluator_evaluate_incomplete_targets(mock_model, mock_dataloader, mock_evaluate_model):
+def test_evaluator_evaluate_incomplete_targets(mock_model, mock_evaluate_model):
     """Test the evaluate method when targets are missing fields."""
     evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
     
@@ -313,39 +317,46 @@ def test_evaluator_evaluate_incomplete_targets(mock_model, mock_dataloader, mock
             {
                 'boxes': torch.tensor([[50, 50, 150, 150]], dtype=torch.float32),
                 # 'labels' key is missing
-                'image_id': torch.tensor([1], dtype=torch.int64)
+                'image_id': torch.tensor(1, dtype=torch.int64)
             },
             {
                 'boxes': torch.tensor([[60, 60, 160, 160]], dtype=torch.float32),
                 'labels': torch.tensor([3], dtype=torch.int64),
-                'image_id': torch.tensor([2], dtype=torch.int64)
+                'image_id': torch.tensor(2, dtype=torch.int64)
             }
         ]
-    
-    incomplete_targets = generate_incomplete_targets()
-    incomplete_dataloader = DataLoader(list(zip(sample_images := [torch.rand(3, 224, 224) for _ in range(2)], incomplete_targets)), batch_size=1)
-    
-    with pytest.raises(KeyError):
-        evaluator.evaluate(incomplete_dataloader)
-    
-    evaluate_model.assert_not_called()
 
-# Test evaluate with reproducibility (same seed leads to same predictions)
-def test_evaluator_evaluate_reproducibility(mock_model, mock_dataloader, mock_evaluate_model):
+    incomplete_targets = generate_incomplete_targets()
+    incomplete_dataloader = DataLoader(
+        list(zip(
+            [torch.rand(3, 224, 224) for _ in range(2)],
+            incomplete_targets
+        )),
+        batch_size=1,
+        collate_fn=collate_fn
+    )
+
+    with pytest.raises(KeyError, match="Target missing required keys:"):
+        evaluator.evaluate(incomplete_dataloader)
+
+    # evaluate_model should not be called due to the exception
+    mock_evaluate_model.assert_not_called()
+
+# Test evaluate for reproducibility
+def test_evaluator_evaluate_reproducibility(mock_model, mock_dataloader, mock_evaluate_model, caplog):
     """Test that Evaluator produces consistent metrics with the same seed."""
     # Since Evaluator does not have a seed parameter, reproducibility is determined by model and data
     # Here, ensure that with the same model and data, metrics are consistent
-    
+
     evaluator1 = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
     evaluator2 = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
-    
+
     with caplog.at_level(logging.INFO):
         metrics1 = evaluator1.evaluate(mock_dataloader)
         metrics2 = evaluator2.evaluate(mock_dataloader)
-    
+
     # Metrics should be identical as evaluate_model is mocked to return the same value
     assert metrics1 == metrics2, "Metrics should be identical across evaluations with the same model and data."
-    
+
     # Ensure that logging happened correctly
     assert "Evaluation completed. Metrics: {'mAP': 0.75, 'precision': 0.8, 'recall': 0.7, 'f1_score': 0.75}" in caplog.text
-

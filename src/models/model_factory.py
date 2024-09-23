@@ -89,7 +89,7 @@ class BaseModel(ABC):
             return model
         except Exception as e:
             logger.error(f"Error loading model from {load_directory}: {e}")
-            raise  # Re-raise the original exception
+            raise Exception(f"Error loading model from {load_directory}: {e}") from e
 
     def freeze_backbone(self) -> None:
         """

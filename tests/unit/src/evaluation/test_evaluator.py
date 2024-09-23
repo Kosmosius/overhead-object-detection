@@ -11,6 +11,14 @@ from torch.utils.data import DataLoader
 def collate_fn(batch):
     return tuple(zip(*batch))
 
+# Custom MockModel class
+class MockModel(torch.nn.Module):
+    def __init__(self):
+        super(MockModel, self).__init__()
+        self.to = MagicMock(return_value=self)
+        self.eval = MagicMock()
+        self.forward = MagicMock()
+
 # Fixtures for sample data
 @pytest.fixture
 def sample_images():
@@ -45,12 +53,7 @@ def sample_targets():
 
 @pytest.fixture
 def mock_model():
-    """Fixture to return a mock PyTorch model."""
-    # Create a MagicMock with spec to ensure it mimics torch.nn.Module
-    model = MagicMock(spec=torch.nn.Module)
-    model.to.return_value = model  # Ensure .to() returns the model itself
-    model.eval.return_value = None  # Ensure .eval() is callable
-    return model
+    return MockModel()
 
 @pytest.fixture
 def mock_evaluate_model():
@@ -258,8 +261,10 @@ def test_evaluator_evaluate_all_below_threshold(mock_model, mock_dataloader, moc
 # Test evaluate with missing fields in outputs
 def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_evaluate_model):
     """Test the evaluate method when model outputs are missing fields."""
-    # Define a side effect function that omits the 'scores' key
-    def mock_forward_missing_fields(images):
+    evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
+
+    # Define outputs missing 'scores' key
+    def mock_forward(images):
         outputs = []
         for idx, img in enumerate(images):
             outputs.append({
@@ -270,12 +275,12 @@ def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_eva
             })
         return outputs
 
-    # Set the side effect for the __call__ method
-    with patch.object(mock_model, '__call__', side_effect=mock_forward_missing_fields):
-        # Expect a KeyError when 'scores' key is missing
-        with pytest.raises(KeyError, match="Model output missing required keys: \['scores'\]"):
-            evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
-            evaluator.evaluate(mock_dataloader)
+    # Assign the custom forward method to the mock model
+    mock_model.forward = mock_forward
+
+    # Adjust the regex pattern and use a raw string to avoid SyntaxWarning
+    with pytest.raises(KeyError, match=r"Model output missing required keys: \['scores'\]"):
+        evaluator.evaluate(mock_dataloader)
 
     # Ensure evaluate_model was not called due to the exception
     mock_evaluate_model.assert_not_called()

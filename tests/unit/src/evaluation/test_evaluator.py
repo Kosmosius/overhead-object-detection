@@ -263,8 +263,8 @@ def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_eva
     """Test the evaluate method when model outputs are missing fields."""
     evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
 
-    # Define outputs missing 'scores' key
-    def mock_forward(images):
+    # Define a side effect function that omits the 'scores' key
+    def mock_forward_missing_fields(images):
         outputs = []
         for idx, img in enumerate(images):
             outputs.append({
@@ -275,12 +275,11 @@ def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_eva
             })
         return outputs
 
-    # Assign the custom forward method to the mock model
-    mock_model.forward = mock_forward
-
-    # Adjust the regex pattern and use a raw string to avoid SyntaxWarning
-    with pytest.raises(KeyError, match=r"Model output missing required keys: \['scores'\]"):
-        evaluator.evaluate(mock_dataloader)
+    # Set the side effect for the __call__ method using patch.object
+    with patch.object(mock_model, '__call__', side_effect=mock_forward_missing_fields):
+        # Use a raw string for the regex pattern to avoid SyntaxWarning
+        with pytest.raises(KeyError, match=r"Model output missing required keys: \['scores'\]"):
+            evaluator.evaluate(mock_dataloader)
 
     # Ensure evaluate_model was not called due to the exception
     mock_evaluate_model.assert_not_called()

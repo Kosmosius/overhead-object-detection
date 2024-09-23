@@ -2,7 +2,7 @@
 
 import pytest
 import torch
-import logging  # Import logging
+import logging
 from unittest.mock import MagicMock, patch
 from src.evaluation.evaluator import Evaluator
 from torch.utils.data import DataLoader
@@ -43,14 +43,21 @@ def sample_targets():
         },
     ]
 
+class MockModel(torch.nn.Module):
+    """A mock model to simulate torch.nn.Module behavior with customizable forward method."""
+    def __init__(self):
+        super(MockModel, self).__init__()
+        self.to = MagicMock(return_value=self)  # Mock the .to() method
+        self.eval = MagicMock(return_value=None)  # Mock the .eval() method
+    
+    def forward(self, images):
+        # Default behavior; can be overridden in tests
+        return []
+
 @pytest.fixture
 def mock_model():
     """Fixture to return a mock PyTorch model."""
-    model = MagicMock(spec=torch.nn.Module, autospec=True)
-    model.to.return_value = model  # Ensure .to() returns the model itself
-    model.eval.return_value = None  # Ensure .eval() is callable
-    model.forward = MagicMock()  # Ensure forward can have side_effect
-    return model
+    return MockModel()
 
 @pytest.fixture
 def mock_evaluate_model():
@@ -261,7 +268,7 @@ def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_eva
     """Test the evaluate method when model outputs are missing fields."""
     evaluator = Evaluator(model=mock_model, device='cpu', confidence_threshold=0.5)
     
-    # Modify the mock_model to return outputs missing 'scores'
+    # Define a side effect function that omits the 'scores' key
     def mock_forward_missing_fields(images):
         outputs = []
         for idx, img in enumerate(images):
@@ -270,20 +277,20 @@ def test_evaluator_evaluate_missing_fields(mock_model, mock_dataloader, mock_eva
             labels = torch.randint(1, 10, (num_preds,))
             image_id = torch.tensor(idx + 1, dtype=torch.int64)
             outputs.append({
-                # 'scores' key is missing
+                # 'scores' key is intentionally missing
                 'boxes': boxes,
                 'labels': labels,
                 'image_id': image_id
             })
         return outputs
 
-    # Set the side effect correctly
-    mock_model.forward.side_effect = mock_forward_missing_fields
+    # Set the side effect for the forward method using patch.object
+    with patch.object(mock_model, 'forward', side_effect=mock_forward_missing_fields):
+        # Expect a KeyError when 'scores' key is missing
+        with pytest.raises(KeyError, match="Model output missing required keys: \['scores'\]"):
+            evaluator.evaluate(mock_dataloader)
 
-    with pytest.raises(KeyError, match="Model output missing required keys:"):
-        evaluator.evaluate(mock_dataloader)
-
-    # evaluate_model should not be called due to the exception
+    # Ensure evaluate_model was not called due to the exception
     mock_evaluate_model.assert_not_called()
 
 # Test evaluate for reproducibility

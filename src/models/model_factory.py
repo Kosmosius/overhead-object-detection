@@ -69,10 +69,10 @@ class BaseModel(ABC):
     def load(cls, load_directory: str) -> 'BaseModel':
         """
         Load the model from the specified directory, along with metadata if available.
-
+    
         Args:
             load_directory (str): Directory to load the model from.
-
+    
         Returns:
             BaseModel: An instance of the loaded model.
         """
@@ -81,24 +81,25 @@ class BaseModel(ABC):
             model_class = MODEL_REGISTRY.get(config.model_type)
             if not model_class:
                 raise ValueError(f"Model type '{config.model_type}' is not registered.")
-
+    
             model = model_class(
                 model_name=load_directory,
                 num_labels=config.num_labels
             )
             logger.info(f"Model loaded from {load_directory}")
-
+    
             metadata_path = os.path.join(load_directory, 'metadata.json')
             if os.path.exists(metadata_path):
                 with open(metadata_path, 'r') as f:
                     metadata = json.load(f)
                 logger.info(f"Metadata loaded from {metadata_path}")
                 model.metadata = metadata
-
+    
             return model
         except Exception as e:
             logger.error(f"Error loading model from {load_directory}: {e}")
-            raise
+            raise Exception(f"Error loading model from {load_directory}: {e}")
+
 
     def freeze_backbone(self) -> None:
         """

@@ -94,12 +94,13 @@ class Evaluator:
             List[Dict[str, torch.Tensor]]: Filtered predictions.
         """
         processed_outputs = []
+        required_keys = ['scores', 'boxes', 'labels', 'image_id']
         for output_idx, output in enumerate(outputs):
-            required_keys = ['scores', 'boxes', 'labels', 'image_id']
-            if not all(key in output for key in required_keys):
-                logger.error(f"Model output at index {output_idx} missing required keys: {required_keys}")
-                raise KeyError(f"Model output missing required keys: {required_keys}")
-
+            missing_keys = [key for key in required_keys if key not in output]
+            if missing_keys:
+                logger.error(f"Model output at index {output_idx} missing required keys: {missing_keys}")
+                raise KeyError(f"Model output missing required keys: {missing_keys}")
+    
             scores = output['scores']
             keep = scores >= self.confidence_threshold
             filtered_output = {

@@ -2,10 +2,14 @@
 
 import pytest
 import torch
+import logging
 from unittest.mock import MagicMock, patch
 from src.evaluation.evaluator import Evaluator
-from src.utils.metrics import evaluate_model
 from torch.utils.data import DataLoader
+
+# Custom collate function for variable-length data
+def collate_fn(batch):
+    return tuple(zip(*batch))
 
 # Fixtures for sample data
 @pytest.fixture
@@ -20,22 +24,22 @@ def sample_targets():
         {
             'boxes': torch.tensor([[50, 50, 150, 150], [30, 30, 100, 100]], dtype=torch.float32),
             'labels': torch.tensor([1, 2], dtype=torch.int64),
-            'image_id': torch.tensor([1], dtype=torch.int64)
+            'image_id': torch.tensor(1, dtype=torch.int64)
         },
         {
             'boxes': torch.tensor([[60, 60, 160, 160]], dtype=torch.float32),
             'labels': torch.tensor([3], dtype=torch.int64),
-            'image_id': torch.tensor([2], dtype=torch.int64)
+            'image_id': torch.tensor(2, dtype=torch.int64)
         },
         {
             'boxes': torch.tensor([[70, 70, 170, 170], [40, 40, 110, 110], [20, 20, 80, 80]], dtype=torch.float32),
             'labels': torch.tensor([4, 5, 6], dtype=torch.int64),
-            'image_id': torch.tensor([3], dtype=torch.int64)
+            'image_id': torch.tensor(3, dtype=torch.int64)
         },
         {
             'boxes': torch.tensor([[80, 80, 180, 180]], dtype=torch.float32),
             'labels': torch.tensor([7], dtype=torch.int64),
-            'image_id': torch.tensor([4], dtype=torch.int64)
+            'image_id': torch.tensor(4, dtype=torch.int64)
         },
     ]
 
@@ -55,7 +59,7 @@ def mock_model():
             scores = torch.rand(num_preds)
             boxes = torch.rand(num_preds, 4) * 200  # Assuming image size up to 200
             labels = torch.randint(1, 10, (num_preds,))
-            image_id = torch.tensor(idx + 1)
+            image_id = torch.tensor(idx + 1, dtype=torch.int64)
             outputs.append({
                 'scores': scores,
                 'boxes': boxes,
@@ -85,7 +89,7 @@ def mock_evaluate_model():
 def mock_dataloader(sample_images, sample_targets):
     """Fixture to return a mock DataLoader."""
     dataset = list(zip(sample_images, sample_targets))
-    return DataLoader(dataset, batch_size=2)
+    return DataLoader(dataset, batch_size=2, collate_fn=collate_fn)
 
 # Test Initialization
 def test_evaluator_initialization(mock_model):

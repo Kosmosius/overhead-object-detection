@@ -477,7 +477,7 @@ def test_base_model_load_unregistered_model(mock_pretrained_model, temporary_mod
         with pytest.raises(ValueError, match="Model type 'unregistered_model_type' is not registered."):
             BaseModel.load(str(temporary_model_dir))
 
-def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model_dir):
+def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model_dir, sample_metadata):
     """Test loading a model without metadata."""
     mock_detr, mock_model_instance = mock_pretrained_model
 
@@ -485,7 +485,8 @@ def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model
     os.makedirs(temporary_model_dir, exist_ok=True)
 
     # Mock the presence of model files but absence of metadata
-    with patch('transformers.AutoConfig.from_pretrained') as mock_auto_config, \
+    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config, \
+         patch('src.models.model_factory.DetrConfig.from_pretrained') as mock_detr_config, \
          patch.dict('src.models.model_factory.MODEL_REGISTRY', {'detr': DetrModel}), \
          patch.object(DetrModel, 'load') as mock_load:
 
@@ -493,15 +494,16 @@ def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model
         mock_config.model_type = 'detr'
         mock_config.num_labels = 91
         mock_auto_config.return_value = mock_config
+        mock_detr_config.return_value = MagicMock(spec=DetrConfig)
 
-        mock_load.return_value = DetrModel(model_name='', num_labels=91)
+        mock_load.return_value = DetrModel(model_name='facebook/detr-resnet-50', num_labels=91)
 
         # Ensure metadata.json does not exist
         with patch('os.path.exists', side_effect=lambda x: False if 'metadata.json' in x else True):
             model = BaseModel.load(str(temporary_model_dir))
 
-        mock_load.assert_called_once_with(str(temporary_model_dir))
-        assert not hasattr(model, 'metadata'), "Model should not have 'metadata' attribute when metadata.json is missing."
+    mock_load.assert_called_once_with(str(temporary_model_dir))
+    assert not hasattr(model, 'metadata'), "Model should not have 'metadata' attribute when metadata.json is missing."
 
 
 def test_base_model_load_corrupted_metadata(mock_pretrained_model, temporary_model_dir):
@@ -509,7 +511,8 @@ def test_base_model_load_corrupted_metadata(mock_pretrained_model, temporary_mod
     mock_detr, mock_model_instance = mock_pretrained_model
 
     # Mock the presence of model files and corrupted metadata
-    with patch('transformers.AutoConfig.from_pretrained') as mock_auto_config, \
+    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config, \
+         patch('src.models.model_factory.DetrConfig.from_pretrained') as mock_detr_config, \
          patch.dict('src.models.model_factory.MODEL_REGISTRY', {'detr': DetrModel}), \
          patch.object(DetrModel, 'load') as mock_load, \
          patch('builtins.open', mock_open(read_data='corrupted json')):
@@ -518,15 +521,16 @@ def test_base_model_load_corrupted_metadata(mock_pretrained_model, temporary_mod
         mock_config.model_type = 'detr'
         mock_config.num_labels = 91
         mock_auto_config.return_value = mock_config
+        mock_detr_config.return_value = MagicMock(spec=DetrConfig)
 
-        mock_load.return_value = DetrModel.load(str(temporary_model_dir))
+        mock_load.return_value = DetrModel(model_name='facebook/detr-resnet-50', num_labels=91)
 
         # Ensure metadata.json exists but is corrupted
         with patch('os.path.exists', return_value=True):
             with pytest.raises(json.JSONDecodeError):
                 BaseModel.load(str(temporary_model_dir))
 
-        mock_load.assert_called_once_with(str(temporary_model_dir))
+    mock_load.assert_called_once_with(str(temporary_model_dir))
 
 
 def test_model_save_directory_creation(mock_pretrained_model, temporary_model_dir, sample_metadata):
@@ -602,10 +606,19 @@ def test_base_model_load_error_handling(mock_pretrained_model, temporary_model_d
     mock_detr, mock_model_instance = mock_pretrained_model
 
     # Mock AutoConfig to raise an exception
-    with patch('src.models.model_factory.AutoConfig.from_pretrained', side_effect=Exception("Config loading failed")):
-        with pytest.raises(Exception) as exc_info:
+    with patch('src.models.model_factory.AutoConfig.from_pretrained', side_effect=Exception("Config loading failed")), \
+         patch('src.models.model_factory.DetrConfig.from_pretrained') as mock_detr_config, \
+         patch.dict('src.models.model_factory.MODEL_REGISTRY', {'detr': DetrModel}), \
+         patch.object(DetrModel, 'load') as mock_load:
+
+        mock_load.return_value = DetrModel(model_name='facebook/detr-resnet-50', num_labels=91)
+
+        with pytest.raises(Exception, match="Error loading model from"):
             BaseModel.load(str(temporary_model_dir))
 
+        # Optionally, verify the exception message contains the original error
+        with pytest.raises(Exception) as exc_info:
+            BaseModel.load(str(temporary_model_dir))
         assert "Error loading model from" in str(exc_info.value), "Incorrect error message when AutoConfig fails."
 
 

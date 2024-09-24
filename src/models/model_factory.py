@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from transformers import (
     DetrForObjectDetection,
     DetrConfig,
-    AutoModelForObjectDetection,
     AutoConfig,
     PreTrainedModel,
 )
@@ -21,18 +20,24 @@ class BaseModel(ABC):
     Abstract base class for object detection models.
     """
 
-    def __init__(self, model_name: str, num_labels: int, **kwargs):
+    def __init__(self, model_name: str, num_labels: int, model: PreTrainedModel = None, **kwargs):
         """
         Initialize the model with the given parameters.
 
         Args:
-            model_name (str): Name of the pre-trained model.
+            model_name (str): Name of the pre-trained model or path to the model.
             num_labels (int): Number of object classes.
+            model (PreTrainedModel, optional): A pre-loaded model instance.
             **kwargs: Additional keyword arguments.
         """
         self.model_name = model_name
         self.num_labels = num_labels
-        self.model = self._build_model(**kwargs)
+        self.metadata = None  # Optional metadata
+
+        if model is not None:
+            self.model = model
+        else:
+            self.model = self._build_model(**kwargs)
 
     @abstractmethod
     def _build_model(self, **kwargs) -> PreTrainedModel:
@@ -69,27 +74,26 @@ class BaseModel(ABC):
     def load(cls, load_directory: str) -> 'BaseModel':
         try:
             config = AutoConfig.from_pretrained(load_directory)
-            model_class = MODEL_REGISTRY.get(config.model_type)
+            model_type = config.model_type
+            model_class = MODEL_REGISTRY.get(model_type)
             if not model_class:
-                raise ValueError(f"Model type '{config.model_type}' is not registered.")
-    
-            model = model_class(
-                model_name=load_directory,
-                num_labels=config.num_labels
-            )
+                raise ValueError(f"Model type '{model_type}' is not registered.")
+
+            # Call the load method of the specific model class
+            model = model_class.load(load_directory)
             logger.info(f"Model loaded from {load_directory}")
-    
+
             metadata_path = os.path.join(load_directory, 'metadata.json')
             if os.path.exists(metadata_path):
                 with open(metadata_path, 'r') as f:
                     metadata = json.load(f)
                 logger.info(f"Metadata loaded from {metadata_path}")
                 model.metadata = metadata
-    
+
             return model
         except Exception as e:
             logger.error(f"Error loading model from {load_directory}: {e}")
-            raise Exception(f"Error loading model from {load_directory}: {e}") from e
+            raise e  # Re-raise the original exception
 
     def freeze_backbone(self) -> None:
         """
@@ -175,6 +179,31 @@ class DetrModel(BaseModel):
             return model
         except Exception as e:
             logger.error(f"Error initializing DETR model: {e}")
+            raise
+
+    @classmethod
+    def load(cls, load_directory: str) -> 'DetrModel':
+        """
+        Load a DetrModel from the specified directory.
+
+        Args:
+            load_directory (str): Directory to load the model from.
+
+        Returns:
+            DetrModel: An instance of DetrModel.
+        """
+        try:
+            model = DetrForObjectDetection.from_pretrained(load_directory)
+            num_labels = model.config.num_labels
+            instance = cls(
+                model_name=load_directory,
+                num_labels=num_labels,
+                model=model  # Pass the loaded model to avoid redundant loading
+            )
+            logger.info(f"DETR model loaded from {load_directory}")
+            return instance
+        except Exception as e:
+            logger.error(f"Error loading DETR model from {load_directory}: {e}")
             raise
 
 # Additional models can be registered here using the @register_model decorator.
@@ -264,11 +293,8 @@ class ModelVersioning:
             raise ValueError(f"Model '{model_name}' version '{version}' not found in registry.")
 
         model_path = model_info['path']
-        model_class = MODEL_REGISTRY.get(model_name)
-        if not model_class:
-            raise ValueError(f"Model type '{model_name}' is not registered.")
-
-        model_instance = model_class.load(model_path)
+        # Use BaseModel.load to automatically determine the correct model class
+        model_instance = BaseModel.load(model_path)
         logger.info(f"Model '{model_name}' version '{version}' loaded.")
         return model_instance
 
@@ -341,5 +367,4 @@ class ModelFactory:
         Returns:
             Dict[str, Type[BaseModel]]: Dictionary of registered model types.
         """
-        return MODEL_REGISTRY
-
+        return MODEL_REGISTRY.copy()

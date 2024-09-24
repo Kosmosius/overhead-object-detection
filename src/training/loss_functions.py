@@ -13,10 +13,7 @@ class LossFunctionFactory:
     """
 
     @staticmethod
-    def get_loss_function(
-        loss_type: str,
-        **kwargs
-    ) -> nn.Module:
+    def get_loss_function(loss_type: str, **kwargs) -> nn.Module:
         """
         Retrieve a loss function based on the specified type.
 
@@ -37,7 +34,7 @@ class LossFunctionFactory:
 
         loss_class = loss_functions.get(loss_type)
         if not loss_class:
-            raise ValueError(f"Loss function '{loss_type}' is not supported.")
+            raise ValueError(f"Unsupported loss type: {loss_type}")
 
         return loss_class(**kwargs)
 
@@ -63,27 +60,44 @@ def compute_loss(
     loss_weights = loss_config.get('loss_weights', {})
     loss_kwargs = loss_config.get('loss_kwargs', {})
 
-    # Instantiate the loss function
-    criterion = LossFunctionFactory.get_loss_function(loss_type, **loss_kwargs)
-    
-    # Initialize total_loss without requiring gradients
-    total_loss = torch.tensor(0.0, device=outputs['logits'].device)
     loss_dict = {}
+    
+    # Initialize total_loss on the same device as outputs
+    if outputs:
+        device = next(iter(outputs.values())).device
+    else:
+        device = torch.device('cpu')  # Default to CPU if outputs are empty
+    total_loss = torch.tensor(0.0, device=device)
 
-    # Compute classification loss
-    if 'logits' in outputs and 'labels' in targets[0]:
+    if not targets:
+        # If targets are empty, return zero loss
+        loss_dict['total_loss'] = total_loss
+        return loss_dict
+
+    # Compute classification loss if 'logits' and 'labels' are present
+    if 'logits' in outputs and all('labels' in target for target in targets):
         logits = outputs['logits']
-        labels = torch.cat([t['labels'] for t in targets])
-        classification_loss = criterion(logits, labels)
+        try:
+            labels = torch.cat([t['labels'] for t in targets])
+        except RuntimeError as e:
+            raise ValueError(f"Error concatenating labels: {e}")
+
+        classification_loss_fn = LossFunctionFactory.get_loss_function(loss_type, **loss_kwargs)
+        classification_loss = classification_loss_fn(logits, labels)
         weight = loss_weights.get('classification_loss', 1.0)
         loss_dict['classification_loss'] = classification_loss * weight
         total_loss = total_loss + loss_dict['classification_loss']
 
-    # Compute bbox loss
-    if 'pred_boxes' in outputs and 'boxes' in targets[0]:
+    # Compute bbox loss if 'pred_boxes' and 'boxes' are present
+    if 'pred_boxes' in outputs and all('boxes' in target for target in targets):
         pred_boxes = outputs['pred_boxes']
-        boxes = torch.cat([t['boxes'] for t in targets])
-        bbox_loss = nn.SmoothL1Loss()(pred_boxes, boxes)
+        try:
+            boxes = torch.cat([t['boxes'] for t in targets])
+        except RuntimeError as e:
+            raise ValueError(f"Error concatenating boxes: {e}")
+
+        bbox_loss_fn = LossFunctionFactory.get_loss_function(loss_type, **loss_kwargs)
+        bbox_loss = bbox_loss_fn(pred_boxes, boxes)
         weight = loss_weights.get('bbox_loss', 1.0)
         loss_dict['bbox_loss'] = bbox_loss * weight
         total_loss = total_loss + loss_dict['bbox_loss']

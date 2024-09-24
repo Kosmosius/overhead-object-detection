@@ -17,9 +17,12 @@ import shutil
 
 @pytest.fixture
 def mock_pretrained_model():
-    """Fixture to mock a PreTrainedModel instance."""
+    """Fixture to mock a PreTrainedModel instance with a config attribute."""
     with patch('src.models.model_factory.DetrForObjectDetection') as mock_detr:
         mock_model_instance = MagicMock(spec=PreTrainedModel)
+        # Add a config attribute with num_labels
+        mock_model_instance.config = MagicMock()
+        mock_model_instance.config.num_labels = 91
         mock_detr.from_pretrained.return_value = mock_model_instance
         yield mock_detr, mock_model_instance
 
@@ -604,56 +607,44 @@ def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model
     # Ensure the temporary model directory exists
     os.makedirs(temporary_model_dir, exist_ok=True)
 
-    # Mock the presence of model files but absence of metadata
-    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config, \
-         patch('src.models.model_factory.DetrModel.load') as mock_model_load:
-
+    # Mock AutoConfig to return the correct configuration
+    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config:
         mock_config = MagicMock()
         mock_config.model_type = 'detr'
         mock_config.num_labels = 91
         mock_auto_config.return_value = mock_config
-
-        mock_model_instance.config.num_labels = 91
-        mock_model_load.return_value = DetrModel(
-            model_name=str(temporary_model_dir),
-            num_labels=91,
-            model=mock_model_instance
-        )
 
         # Ensure metadata.json does not exist
         with patch('os.path.exists', side_effect=lambda x: False if 'metadata.json' in x else True):
             model = BaseModel.load(str(temporary_model_dir))
 
-        mock_model_load.assert_called_once_with(str(temporary_model_dir))
-        assert not hasattr(model, 'metadata'), "Model should not have 'metadata' attribute when metadata.json is missing."
+    # Verify that the loaded model has the mocked model instance
+    assert model.model == mock_model_instance, "Model's 'model' attribute should be the mocked model instance."
+    assert not hasattr(model, 'metadata'), "Model should not have 'metadata' attribute when metadata.json is missing."
 
 def test_base_model_load_corrupted_metadata(mock_pretrained_model, temporary_model_dir):
     """Test loading a model with corrupted metadata."""
     mock_detr, mock_model_instance = mock_pretrained_model
 
-    # Mock the presence of model files and corrupted metadata
+    # Mock AutoConfig to return the correct configuration
     with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config, \
-         patch('src.models.model_factory.DetrModel.load') as mock_model_load, \
-         patch('builtins.open', mock_open(read_data='corrupted json')):
+         patch('builtins.open', mock_open(read_data='corrupted json')) as mocked_file:
 
         mock_config = MagicMock()
         mock_config.model_type = 'detr'
         mock_config.num_labels = 91
         mock_auto_config.return_value = mock_config
 
-        mock_model_instance.config.num_labels = 91
-        mock_model_load.return_value = DetrModel(
-            model_name=str(temporary_model_dir),
-            num_labels=91,
-            model=mock_model_instance
-        )
+        # Ensure the config attribute is already set via fixture
+        # No need to set it again here
 
         # Ensure metadata.json exists but is corrupted
         with patch('os.path.exists', return_value=True):
             with pytest.raises(json.JSONDecodeError):
                 BaseModel.load(str(temporary_model_dir))
 
-        mock_model_load.assert_called_once_with(str(temporary_model_dir))
+    # Verify that 'DetrForObjectDetection.from_pretrained' was called with the correct path
+    mock_detr.from_pretrained.assert_called_once_with(str(temporary_model_dir))
 
 def test_model_save_directory_creation(mock_pretrained_model, temporary_model_dir, sample_metadata):
     """Test that the save method creates the directory if it does not exist."""

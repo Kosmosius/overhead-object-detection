@@ -65,7 +65,9 @@ def compute_loss(
 
     # Instantiate the loss function
     criterion = LossFunctionFactory.get_loss_function(loss_type, **loss_kwargs)
-    total_loss = torch.tensor(0.0, requires_grad=True).to(outputs['logits'].device)
+    
+    # Initialize total_loss without requiring gradients
+    total_loss = torch.tensor(0.0, device=outputs['logits'].device)
     loss_dict = {}
 
     # Compute classification loss
@@ -75,22 +77,16 @@ def compute_loss(
         classification_loss = criterion(logits, labels)
         weight = loss_weights.get('classification_loss', 1.0)
         loss_dict['classification_loss'] = classification_loss * weight
-        total_loss += loss_dict['classification_loss']
-        logger.debug(f"Classification loss computed: {classification_loss.item()}")
+        total_loss = total_loss + loss_dict['classification_loss']
 
-    # Compute bounding box regression loss
+    # Compute bbox loss
     if 'pred_boxes' in outputs and 'boxes' in targets[0]:
         pred_boxes = outputs['pred_boxes']
-        target_boxes = torch.cat([t['boxes'] for t in targets])
-        bbox_loss_fn = nn.SmoothL1Loss()
-        bbox_loss = bbox_loss_fn(pred_boxes, target_boxes)
+        boxes = torch.cat([t['boxes'] for t in targets])
+        bbox_loss = nn.SmoothL1Loss()(pred_boxes, boxes)
         weight = loss_weights.get('bbox_loss', 1.0)
         loss_dict['bbox_loss'] = bbox_loss * weight
-        total_loss += loss_dict['bbox_loss']
-        logger.debug(f"Bounding box loss computed: {bbox_loss.item()}")
-
-    # Add other losses as needed
-    # For example, auxiliary losses, regularization terms, etc.
+        total_loss = total_loss + loss_dict['bbox_loss']
 
     loss_dict['total_loss'] = total_loss
     return loss_dict

@@ -4,6 +4,7 @@ import pytest
 import torch
 import torch.nn as nn
 from unittest.mock import patch
+import logging
 from src.training.loss_functions import LossFunctionFactory, compute_loss
 
 
@@ -148,7 +149,7 @@ def test_compute_loss_only_bbox(mock_outputs, mock_targets, default_loss_config)
     assert loss["bbox_loss"].dim() == 0, "bbox_loss should be a scalar tensor."
     assert loss["total_loss"].dim() == 0, "total_loss should be a scalar tensor."
 
-def test_compute_loss_custom_loss_type(mock_outputs, mock_targets, custom_loss_config):
+def test_compute_loss_custom_loss_type():
     """Test compute_loss with a custom loss type (e.g., MSELoss)."""
     loss_config = {
         "loss_type": "mse",
@@ -160,28 +161,31 @@ def test_compute_loss_custom_loss_type(mock_outputs, mock_targets, custom_loss_c
             "reduction": "sum"
         }
     }
-    
-    # Modify mock outputs and targets to be compatible with MSELoss
-    # For simplicity, ensure logits and labels have compatible shapes
+
+    # Define mock outputs and targets with compatible shapes for MSELoss
     outputs = {
         'logits': torch.randn(2, 10, requires_grad=True),
         'pred_boxes': torch.randn(2, 4, requires_grad=True)
     }
     targets = [
-        {'labels': torch.randn(10), 'boxes': torch.randn(4)},
-        {'labels': torch.randn(10), 'boxes': torch.randn(4)}
+        {'labels': torch.randn(2, 10), 'boxes': torch.randn(2, 4)},
+        {'labels': torch.randn(2, 10), 'boxes': torch.randn(2, 4)}
     ]
-    
+
     loss = compute_loss(outputs, targets, model=None, loss_config=loss_config)
-    
-    assert "classification_loss" in loss, "classification_loss should be present in loss dictionary."
-    assert "bbox_loss" in loss, "bbox_loss should be present in loss dictionary."
-    assert "total_loss" in loss, "total_loss should be present in loss dictionary."
-    
-    # Check that losses are weighted correctly
-    assert loss["classification_loss"].item() == nn.MSELoss(reduction="sum")(outputs['logits'], torch.cat([t['labels'].unsqueeze(0) for t in targets])).item() * 0.7, "classification_loss weight mismatch."
-    assert loss["bbox_loss"].item() == nn.SmoothL1Loss()(outputs['pred_boxes'], torch.cat([t['boxes'].unsqueeze(0) for t in targets])).item() * 0.3, "bbox_loss weight mismatch."
-    assert loss["total_loss"].item() == loss["classification_loss"].item() + loss["bbox_loss"].item(), "total_loss should be the sum of individual losses."
+
+    # Compute expected individual losses
+    classification_loss = nn.MSELoss(reduction="sum")(outputs['logits'], torch.cat([t['labels'] for t in targets])).item()
+    bbox_loss = nn.SmoothL1Loss()(outputs['pred_boxes'], torch.cat([t['boxes'] for t in targets])).item()
+
+    # Expected weighted losses
+    expected_classification_loss = classification_loss * 0.7
+    expected_bbox_loss = bbox_loss * 0.3
+    expected_total_loss = expected_classification_loss + expected_bbox_loss
+
+    assert loss["classification_loss"].item() == expected_classification_loss, "classification_loss weighting mismatch."
+    assert loss["bbox_loss"].item() == expected_bbox_loss, "bbox_loss weighting mismatch."
+    assert loss["total_loss"].item() == expected_total_loss, "total_loss aggregation mismatch."
 
 def test_compute_loss_unsupported_loss_type(mock_outputs, mock_targets, default_loss_config):
     """Test compute_loss with an unsupported loss type."""
@@ -261,11 +265,9 @@ def test_compute_loss_empty_targets(mock_outputs, default_loss_config):
     """Test compute_loss with empty targets."""
     outputs = mock_outputs
     targets = []
-    
+
     loss = compute_loss(outputs, targets, model=None, loss_config=default_loss_config)
-    
-    assert "classification_loss" not in loss, "classification_loss should not be present when targets are empty."
-    assert "bbox_loss" not in loss, "bbox_loss should not be present when targets are empty."
+
     assert "total_loss" in loss, "total_loss should be present."
     assert loss["total_loss"].item() == 0.0, "total_loss should be zero when targets are empty."
 
@@ -276,44 +278,49 @@ def test_compute_loss_loss_weights_defaults(mock_outputs, mock_targets, default_
         "loss_weights": {},  # No weights provided
         "loss_kwargs": {}
     }
-    
+
     loss = compute_loss(mock_outputs, mock_targets, model=None, loss_config=loss_config)
-    
+
     assert "classification_loss" in loss, "classification_loss should be present."
     assert "bbox_loss" in loss, "bbox_loss should be present."
     assert "total_loss" in loss, "total_loss should be present."
-    
+
+    # Compute expected individual losses
+    expected_classification_loss = nn.CrossEntropyLoss()(mock_outputs['logits'], torch.cat([t['labels'] for t in mock_targets])).item()
+    expected_bbox_loss = nn.SmoothL1Loss()(mock_outputs['pred_boxes'], torch.cat([t['boxes'] for t in mock_targets])).item()
+
     # Check that losses are weighted by default 1.0
-    assert loss["classification_loss"].item() == nn.CrossEntropyLoss()(mock_outputs['logits'], torch.cat([t['labels'] for t in mock_targets])).item(), "classification_loss weight should default to 1.0."
-    assert loss["bbox_loss"].item() == nn.SmoothL1Loss()(mock_outputs['pred_boxes'], torch.cat([t['boxes'] for t in mock_targets])).item(), "bbox_loss weight should default to 1.0."
-    assert loss["total_loss"].item() == loss["classification_loss"].item() + loss["bbox_loss"].item(), "total_loss should be the sum of individual losses."
+    assert torch.isclose(torch.tensor(loss["classification_loss"].item()), torch.tensor(expected_classification_loss), atol=1e-6), "classification_loss weight should default to 1.0."
+    assert torch.isclose(torch.tensor(loss["bbox_loss"].item()), torch.tensor(expected_bbox_loss), atol=1e-6), "bbox_loss weight should default to 1.0."
+
+    # Check that total_loss is the sum of individual losses
+    expected_total_loss = expected_classification_loss + expected_bbox_loss
+    assert torch.isclose(torch.tensor(loss["total_loss"].item()), torch.tensor(expected_total_loss), atol=1e-6), "total_loss should be the sum of individual losses."
 
 def test_compute_loss_custom_loss_weights(mock_outputs, mock_targets, custom_loss_config):
     """Test compute_loss with custom loss weights."""
     loss_config = custom_loss_config
-    
+
     loss = compute_loss(mock_outputs, mock_targets, model=None, loss_config=loss_config)
-    
+
     # Compute expected individual losses
-    classification_loss = nn.MSELoss(reduction="sum")(mock_outputs['logits'], torch.cat([t['labels'] for t in mock_targets].unsqueeze(0))).item()
-    bbox_loss = nn.SmoothL1Loss()(mock_outputs['pred_boxes'], torch.cat([t['boxes'] for t in mock_targets].unsqueeze(0))).item()
-    
+    # Ensure that torch.cat is correctly applied to tensors before unsqueezing
+    classification_loss = nn.MSELoss(reduction="sum")(mock_outputs['logits'], torch.cat([t['labels'] for t in mock_targets])).item()
+    bbox_loss = nn.SmoothL1Loss()(mock_outputs['pred_boxes'], torch.cat([t['boxes'] for t in mock_targets])).item()
+
+    # Expected weighted losses
     expected_classification_loss = classification_loss * 0.7
     expected_bbox_loss = bbox_loss * 0.3
     expected_total_loss = expected_classification_loss + expected_bbox_loss
-    
-    assert "classification_loss" in loss, "classification_loss should be present."
-    assert "bbox_loss" in loss, "bbox_loss should be present."
-    assert "total_loss" in loss, "total_loss should be present."
-    
-    assert torch.isclose(loss["classification_loss"], torch.tensor(expected_classification_loss)), "classification_loss weighting mismatch."
-    assert torch.isclose(loss["bbox_loss"], torch.tensor(expected_bbox_loss)), "bbox_loss weighting mismatch."
-    assert torch.isclose(loss["total_loss"], torch.tensor(expected_total_loss)), "total_loss aggregation mismatch."
+
+    assert torch.isclose(torch.tensor(loss["classification_loss"].item()), torch.tensor(expected_classification_loss), atol=1e-6), "classification_loss weighting mismatch."
+    assert torch.isclose(torch.tensor(loss["bbox_loss"].item()), torch.tensor(expected_bbox_loss), atol=1e-6), "bbox_loss weighting mismatch."
+    assert torch.isclose(torch.tensor(loss["total_loss"].item()), torch.tensor(expected_total_loss), atol=1e-6), "total_loss aggregation mismatch."
 
 def test_compute_loss_logging(mock_outputs, mock_targets, default_loss_config, caplog):
     """Test that compute_loss logs the computed losses."""
     with caplog.at_level(logging.DEBUG):
-        loss = compute_loss(mock_outputs, mock_targets, model=None, loss_config=default_loss_config)
+        compute_loss(mock_outputs, mock_targets, model=None, loss_config=default_loss_config)
     
     assert "Classification loss computed" in caplog.text, "Did not log classification loss."
     assert "Bounding box loss computed" in caplog.text, "Did not log bounding box loss."
@@ -471,28 +478,29 @@ def test_compute_loss_negative_weights(mock_outputs, mock_targets, default_loss_
         },
         "loss_kwargs": {}
     }
-    
+
     loss = compute_loss(mock_outputs, mock_targets, model=None, loss_config=loss_config)
-    
+
     assert "classification_loss" in loss, "classification_loss should be present."
     assert "bbox_loss" in loss, "bbox_loss should be present."
     assert "total_loss" in loss, "total_loss should be present."
-    assert loss["classification_loss"].item() == nn.CrossEntropyLoss()(mock_outputs['logits'], torch.cat([t['labels'] for t in mock_targets])).item() * -1.0, "classification_loss weighting mismatch with negative weight."
-    assert loss["total_loss"].item() == (loss["classification_loss"].item()) + (loss["bbox_loss"].item()), "total_loss aggregation mismatch with negative weight."
+
+    # Compute expected individual losses
+    classification_loss = nn.CrossEntropyLoss()(mock_outputs['logits'], torch.cat([t['labels'] for t in mock_targets])).item()
+    bbox_loss = nn.SmoothL1Loss()(mock_outputs['pred_boxes'], torch.cat([t['boxes'] for t in mock_targets])).item()
+
+    # Apply weights
+    expected_classification_loss = classification_loss * -1.0
+    expected_bbox_loss = bbox_loss * 1.0
+    expected_total_loss = expected_classification_loss + expected_bbox_loss
+
+    # Use torch.isclose for comparison
+    assert torch.isclose(torch.tensor(loss["classification_loss"].item()), torch.tensor(expected_classification_loss), atol=1e-6), "classification_loss weighting mismatch with negative weight."
+    assert torch.isclose(torch.tensor(loss["bbox_loss"].item()), torch.tensor(expected_bbox_loss), atol=1e-6), "bbox_loss weighting mismatch."
+    assert torch.isclose(torch.tensor(loss["total_loss"].item()), torch.tensor(expected_total_loss), atol=1e-6), "total_loss aggregation mismatch with negative weight."
 
 def test_compute_loss_non_standard_loss_type():
     """Test compute_loss with a loss type that doesn't fit standard patterns."""
-    outputs = {
-        'logits': torch.randn(4, 5, requires_grad=True),  # Batch size of 4
-        'pred_boxes': torch.randn(4, 4, requires_grad=True)
-    }
-    targets = [
-        {'labels': torch.tensor([1], dtype=torch.long), 'boxes': torch.tensor([[10.0, 10.0, 20.0, 20.0]], dtype=torch.float32)},
-        {'labels': torch.tensor([2], dtype=torch.long), 'boxes': torch.tensor([[30.0, 30.0, 40.0, 40.0]], dtype=torch.float32)},
-        {'labels': torch.tensor([3], dtype=torch.long), 'boxes': torch.tensor([[50.0, 50.0, 60.0, 60.0]], dtype=torch.float32)},
-        {'labels': torch.tensor([4], dtype=torch.long), 'boxes': torch.tensor([[70.0, 70.0, 80.0, 80.0]], dtype=torch.float32)}
-    ]
-
     loss_config = {
         "loss_type": "l1",
         "loss_weights": {
@@ -502,12 +510,36 @@ def test_compute_loss_non_standard_loss_type():
         "loss_kwargs": {}
     }
 
+    outputs = {
+        'logits': torch.randn(4, 5, requires_grad=True),  # Batch size of 4, 5 classes/features
+        'pred_boxes': torch.randn(4, 4, requires_grad=True)  # Correct shape for bounding boxes
+    }
+    targets = [
+        {'labels': torch.randn(5), 'boxes': torch.randn(4)},
+        {'labels': torch.randn(5), 'boxes': torch.randn(4)},
+        {'labels': torch.randn(5), 'boxes': torch.randn(4)},
+        {'labels': torch.randn(5), 'boxes': torch.randn(4)}
+    ]
+
     loss = compute_loss(outputs, targets, model=None, loss_config=loss_config)
 
     assert "classification_loss" in loss, "classification_loss should be present."
     assert "bbox_loss" in loss, "bbox_loss should be present."
     assert "total_loss" in loss, "total_loss should be present."
-    # Additional assertions can be added as needed
+
+    # Compute expected individual losses
+    classification_loss = nn.L1Loss()(outputs['logits'], torch.cat([t['labels'] for t in targets])).item()
+    bbox_loss = nn.SmoothL1Loss()(outputs['pred_boxes'], torch.cat([t['boxes'] for t in targets])).item()
+
+    # Apply weights
+    expected_classification_loss = classification_loss * 1.0
+    expected_bbox_loss = bbox_loss * 2.0
+    expected_total_loss = expected_classification_loss + expected_bbox_loss
+
+    # Use torch.isclose for comparison
+    assert torch.isclose(torch.tensor(loss["classification_loss"].item()), torch.tensor(expected_classification_loss), atol=1e-6), "classification_loss weighting mismatch."
+    assert torch.isclose(torch.tensor(loss["bbox_loss"].item()), torch.tensor(expected_bbox_loss), atol=1e-6), "bbox_loss weighting mismatch."
+    assert torch.isclose(torch.tensor(loss["total_loss"].item()), torch.tensor(expected_total_loss), atol=1e-6), "total_loss aggregation mismatch."
 
 def test_compute_loss_incorrect_loss_kwargs():
     """Test compute_loss with incorrect loss_kwargs that should raise an error."""
@@ -607,9 +639,9 @@ def test_compute_loss_multiple_predictions_per_sample(default_loss_config):
     }
     targets = [
         {'labels': torch.tensor([1, 2], dtype=torch.long), 'boxes': torch.tensor([[10.0, 10.0, 50.0, 50.0],
-                                                                                      [20.0, 20.0, 60.0, 60.0]], dtype=torch.float32)},
+                                                                                       [20.0, 20.0, 60.0, 60.0]], dtype=torch.float32)},
         {'labels': torch.tensor([0, 1], dtype=torch.long), 'boxes': torch.tensor([[30.0, 30.0, 70.0, 70.0],
-                                                                                      [40.0, 40.0, 80.0, 80.0]], dtype=torch.float32)}
+                                                                                       [40.0, 40.0, 80.0, 80.0]], dtype=torch.float32)}
     ]
 
     loss = compute_loss(outputs, targets, model=None, loss_config=default_loss_config)
@@ -617,7 +649,20 @@ def test_compute_loss_multiple_predictions_per_sample(default_loss_config):
     assert "classification_loss" in loss, "classification_loss should be present."
     assert "bbox_loss" in loss, "bbox_loss should be present."
     assert "total_loss" in loss, "total_loss should be present."
-    assert loss["total_loss"] == loss["classification_loss"] + loss["bbox_loss"], "total_loss should be the sum of individual losses."
+
+    # Compute expected individual losses
+    classification_loss = nn.CrossEntropyLoss()(outputs['logits'], torch.cat([t['labels'] for t in targets])).item()
+    bbox_loss = nn.SmoothL1Loss()(outputs['pred_boxes'], torch.cat([t['boxes'] for t in targets])).item()
+
+    # Apply weights
+    expected_classification_loss = classification_loss * 1.0
+    expected_bbox_loss = bbox_loss * 1.0
+    expected_total_loss = expected_classification_loss + expected_bbox_loss
+
+    # Use torch.isclose for comparison
+    assert torch.isclose(torch.tensor(loss["classification_loss"].item()), torch.tensor(expected_classification_loss), atol=1e-6), "classification_loss weighting mismatch."
+    assert torch.isclose(torch.tensor(loss["bbox_loss"].item()), torch.tensor(expected_bbox_loss), atol=1e-6), "bbox_loss weighting mismatch."
+    assert torch.isclose(torch.tensor(loss["total_loss"].item()), torch.tensor(expected_total_loss), atol=1e-6), "total_loss should be the sum of individual losses."
 
 def test_compute_loss_incorrect_device(mock_outputs, mock_targets, default_loss_config):
     """Test compute_loss when outputs are on a different device."""

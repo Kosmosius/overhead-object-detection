@@ -607,8 +607,10 @@ def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model
     # Ensure the temporary model directory exists
     os.makedirs(temporary_model_dir, exist_ok=True)
 
-    # Mock AutoConfig to return the correct configuration
-    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config:
+    # Mock AutoConfig to return the correct configuration and allow DetrModel.load to be called
+    with patch('src.models.model_factory.AutoConfig.from_pretrained') as mock_auto_config, \
+         patch('src.models.model_factory.DetrModel.load', wraps=DetrModel.load) as mock_model_load:
+
         mock_config = MagicMock()
         mock_config.model_type = 'detr'
         mock_config.num_labels = 91
@@ -620,7 +622,7 @@ def test_base_model_load_missing_metadata(mock_pretrained_model, temporary_model
 
     # Verify that the loaded model has the mocked model instance
     assert model.model == mock_model_instance, "Model's 'model' attribute should be the mocked model instance."
-    assert not hasattr(model, 'metadata'), "Model should not have 'metadata' attribute when metadata.json is missing."
+    assert model.metadata is None, "Model's 'metadata' should be None when metadata.json is missing."
 
 def test_base_model_load_corrupted_metadata(mock_pretrained_model, temporary_model_dir):
     """Test loading a model with corrupted metadata."""
@@ -634,9 +636,6 @@ def test_base_model_load_corrupted_metadata(mock_pretrained_model, temporary_mod
         mock_config.model_type = 'detr'
         mock_config.num_labels = 91
         mock_auto_config.return_value = mock_config
-
-        # Ensure the config attribute is already set via fixture
-        # No need to set it again here
 
         # Ensure metadata.json exists but is corrupted
         with patch('os.path.exists', return_value=True):

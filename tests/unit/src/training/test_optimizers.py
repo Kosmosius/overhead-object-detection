@@ -136,57 +136,72 @@ def test_configure_optimizer_invalid_type(mock_model):
 # 3. Tests for configure_scheduler
 
 @pytest.mark.parametrize(
-    "scheduler_type, expected_scheduler_type, kwargs, description",
+    "scheduler_type, scheduler_specific_kwargs, description",
     [
-        ("linear", SchedulerType.LINEAR, {"num_warmup_steps": 0, "num_training_steps": 1000}, "Linear scheduler with default parameters"),
-        ("cosine", SchedulerType.COSINE, {"num_warmup_steps": 100, "num_training_steps": 1000}, "Cosine scheduler with custom parameters"),
-        ("cosine_with_restarts", SchedulerType.COSINE_WITH_RESTARTS, {"num_warmup_steps": 100, "num_training_steps": 1000, "num_cycles": 0.5}, "Cosine with restarts scheduler"),
-        ("polynomial", SchedulerType.POLYNOMIAL, {"num_warmup_steps": 100, "num_training_steps": 1000, "power": 1.0}, "Polynomial scheduler"),
+        (
+            "linear",
+            {"num_warmup_steps": 0, "num_training_steps": 1000},
+            "Linear scheduler with default parameters"
+        ),
+        (
+            "cosine",
+            {"num_warmup_steps": 100, "num_training_steps": 1000},
+            "Cosine scheduler with custom parameters"
+        ),
+        (
+            "cosine_with_restarts",
+            {"num_warmup_steps": 100, "num_training_steps": 1000, "num_cycles": 0.5},
+            "Cosine with restarts scheduler"
+        ),
+        (
+            "polynomial",
+            {"num_warmup_steps": 100, "num_training_steps": 1000, "power": 1.0},
+            "Polynomial scheduler"
+        ),
     ]
 )
-def test_configure_scheduler_supported_types_cosine_with_restarts():
-    """Test configure_scheduler with cosine_with_restarts scheduler and additional arguments."""
+def test_configure_scheduler_supported_types(scheduler_type, scheduler_specific_kwargs, description):
+    """
+    Test configure_scheduler with various supported scheduler types and additional arguments.
+    
+    Args:
+        scheduler_type (str): The type of scheduler to test.
+        scheduler_specific_kwargs (dict): Additional scheduler-specific keyword arguments.
+        description (str): Description of the scheduler type.
+    """
+    # Initialize optimizer
     optimizer = torch.optim.AdamW(nn.Linear(10, 2).parameters(), lr=5e-5, weight_decay=0.01)
+    
+    # Create config dictionary with scheduler type and specific kwargs
     config = {
-        "scheduler_type": "cosine_with_restarts",
-        "num_warmup_steps": 100,
-        "num_training_steps": 1000,
-        "num_cycles": 0.5  # Additional argument
+        "scheduler_type": scheduler_type,
+        "num_warmup_steps": scheduler_specific_kwargs.get("num_warmup_steps", 0),
+        "num_training_steps": scheduler_specific_kwargs.get("num_training_steps", 1000),
     }
+    # Add additional scheduler-specific arguments
+    config.update({k: v for k, v in scheduler_specific_kwargs.items() if k not in ["num_warmup_steps", "num_training_steps"]})
+    
     with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
         mock_scheduler = MagicMock()
         mock_get_scheduler.return_value = mock_scheduler
-        scheduler = configure_scheduler(optimizer, num_training_steps=1000, config=config)
-        mock_get_scheduler.assert_called_once_with(
-            name="cosine_with_restarts",
-            optimizer=optimizer,
-            num_warmup_steps=100,
-            num_training_steps=1000,
-            num_cycles=0.5  # Ensure additional_arg is passed
-        )
-        assert scheduler == mock_scheduler, "Scheduler should be the mocked scheduler instance."
-
-def test_configure_scheduler_supported_types_polynomial():
-    """Test configure_scheduler with polynomial scheduler and additional arguments."""
-    optimizer = torch.optim.AdamW(nn.Linear(10, 2).parameters(), lr=5e-5, weight_decay=0.01)
-    config = {
-        "scheduler_type": "polynomial",
-        "num_warmup_steps": 100,
-        "num_training_steps": 1000,
-        "power": 1.0  # Additional argument
-    }
-    with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
-        mock_scheduler = MagicMock()
-        mock_get_scheduler.return_value = mock_scheduler
-        scheduler = configure_scheduler(optimizer, num_training_steps=1000, config=config)
-        mock_get_scheduler.assert_called_once_with(
-            name="polynomial",
-            optimizer=optimizer,
-            num_warmup_steps=100,
-            num_training_steps=1000,
-            power=1.0  # Ensure additional_arg is passed
-        )
-        assert scheduler == mock_scheduler, "Scheduler should be the mocked scheduler instance."
+        
+        # Configure scheduler
+        scheduler = configure_scheduler(optimizer, config["num_training_steps"], config)
+        
+        # Prepare expected call arguments
+        expected_call_args = {
+            "name": scheduler_type,
+            "optimizer": optimizer,
+            "num_warmup_steps": config["num_warmup_steps"],
+            "num_training_steps": config["num_training_steps"],
+        }
+        expected_call_args.update({k: v for k, v in scheduler_specific_kwargs.items() if k not in ["num_warmup_steps", "num_training_steps"]})
+        
+        # Assert that get_scheduler was called with the expected arguments
+        mock_get_scheduler.assert_called_once_with(**expected_call_args)
+        
+        # Assert that the returned scheduler is the mocked instance
+        assert scheduler == mock_scheduler, f"Scheduler should be the mocked scheduler instance for {description}."
 
 def test_configure_scheduler_unsupported_type(mock_model, default_config):
     """Test that configure_scheduler raises ValueError for unsupported scheduler types."""

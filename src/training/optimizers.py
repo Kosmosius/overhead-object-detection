@@ -1,20 +1,27 @@
 # src/training/optimizers.py
 
 import torch
-from torch.optim import SGD, Adam, RMSprop, AdamW, Nadam
+from torch.optim import SGD, Adam, RMSprop, AdamW  # Removed Nadam import
 from transformers import get_scheduler
+from typing import Optional, List, Dict, Any
 
-def get_optimizer(model, optimizer_type="adamw", learning_rate=5e-5, weight_decay=0.01, parameter_groups=None):
+def get_optimizer(
+    model: torch.nn.Module,
+    optimizer_type: str = "adamw",
+    learning_rate: float = 5e-5,
+    weight_decay: float = 0.01,
+    parameter_groups: Optional[List[Dict[str, Any]]] = None
+) -> torch.optim.Optimizer:
     """
     Return the appropriate optimizer for the given model.
-    
+
     Args:
         model (torch.nn.Module): The model being trained.
-        optimizer_type (str): The type of optimizer to use ('adamw', 'sgd', 'adam', 'nadam', or 'rmsprop').
+        optimizer_type (str): The type of optimizer to use ('adamw', 'sgd', 'adam', or 'rmsprop').
         learning_rate (float): The learning rate for the optimizer.
         weight_decay (float): Weight decay (L2 penalty) for the optimizer.
         parameter_groups (list, optional): Optional list of parameter groups with specific learning rates or optimizations.
-        
+
     Returns:
         torch.optim.Optimizer: The initialized optimizer.
     """
@@ -22,21 +29,22 @@ def get_optimizer(model, optimizer_type="adamw", learning_rate=5e-5, weight_deca
         params = parameter_groups
     else:
         params = model.parameters()
-    
+
     optimizers = {
         "adamw": AdamW(params, lr=learning_rate, weight_decay=weight_decay),
         "adam": Adam(params, lr=learning_rate, weight_decay=weight_decay),
         "sgd": SGD(params, lr=learning_rate, weight_decay=weight_decay, momentum=0.9),
         "rmsprop": RMSprop(params, lr=learning_rate, weight_decay=weight_decay, momentum=0.9),
-        "nadam": Nadam(params, lr=learning_rate, weight_decay=weight_decay)
+        # "nadam": Nadam(params, lr=learning_rate, weight_decay=weight_decay)  # Removed Nadam
     }
 
-    if optimizer_type.lower() not in optimizers:
+    optimizer_type = optimizer_type.lower()
+    if optimizer_type not in optimizers:
         raise ValueError(f"Unsupported optimizer type '{optimizer_type}'. Supported types: {list(optimizers.keys())}")
 
-    return optimizers[optimizer_type.lower()]
+    return optimizers[optimizer_type]
 
-def configure_optimizer(model, config):
+def configure_optimizer(model: torch.nn.Module, config: Dict[str, Any]) -> torch.optim.Optimizer:
     """
     Configure the optimizer from a configuration file.
 
@@ -55,7 +63,7 @@ def configure_optimizer(model, config):
         parameter_groups=config.get("parameter_groups", None)
     )
 
-def configure_scheduler(optimizer, num_training_steps, config):
+def configure_scheduler(optimizer: torch.optim.Optimizer, num_training_steps: int, config: Dict[str, Any]):
     """
     Configure the learning rate scheduler.
 
@@ -74,7 +82,7 @@ def configure_scheduler(optimizer, num_training_steps, config):
         num_training_steps=num_training_steps
     )
 
-def get_optimizer_and_scheduler(model, config, num_training_steps):
+def get_optimizer_and_scheduler(model: torch.nn.Module, config: Dict[str, Any], num_training_steps: int):
     """
     Return both optimizer and scheduler based on the provided configuration.
 
@@ -88,5 +96,5 @@ def get_optimizer_and_scheduler(model, config, num_training_steps):
     """
     optimizer = configure_optimizer(model, config)
     scheduler = configure_scheduler(optimizer, num_training_steps, config)
-    
+
     return optimizer, scheduler

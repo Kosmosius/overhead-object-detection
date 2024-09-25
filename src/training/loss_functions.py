@@ -64,13 +64,6 @@ def compute_loss(
         logits = outputs['logits']
         try:
             labels = torch.cat([t['labels'] for t in targets]).to(logits.device)
-            if classification_loss_type in ['cross_entropy', 'nll_loss']:
-                labels = labels.long()
-            elif classification_loss_type in ['mse', 'l1', 'smooth_l1']:
-                labels = labels.float()
-            else:
-                # Default to float if loss type is unrecognized (optional)
-                labels = labels.float()
         except RuntimeError as e:
             raise ValueError(f"Error concatenating labels: {e}")
 
@@ -80,6 +73,15 @@ def compute_loss(
             classification_loss_fn = LossFunctionFactory.get_loss_function(classification_loss_type, **classification_loss_kwargs)
         except ValueError as e:
             raise ValueError(f"Unsupported classification loss type: {classification_loss_type}.") from e
+
+        # Label type conversion inside the if block
+        if classification_loss_type in ['cross_entropy', 'nll_loss']:
+            labels = labels.long()
+        elif classification_loss_type in ['mse', 'l1', 'smooth_l1']:
+            labels = labels.float()
+        else:
+            # Default to float if loss type is unrecognized (optional)
+            labels = labels.float()
 
         classification_loss = classification_loss_fn(logits, labels)
         weight = loss_weights.get('classification_loss', 1.0)

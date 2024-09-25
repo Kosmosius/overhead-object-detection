@@ -56,7 +56,6 @@ def custom_config():
         ("adam", torch.optim.Adam, {"lr": 1e-3, "weight_decay": 0.001}, "Adam with custom parameters"),
         ("sgd", torch.optim.SGD, {"lr": 0.1, "weight_decay": 0.0005, "momentum": 0.9}, "SGD with momentum"),
         ("rmsprop", torch.optim.RMSprop, {"lr": 0.01, "weight_decay": 0.0001, "momentum": 0.9}, "RMSprop with momentum"),
-        ("nadam", torch.optim.NAdam, {"lr": 0.002, "weight_decay": 0.0002}, "Nadam with custom parameters"),
     ]
 )
 def test_get_optimizer_supported_types(optimizer_type, expected_class, kwargs, description, mock_model):

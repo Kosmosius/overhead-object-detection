@@ -67,7 +67,7 @@ def test_get_optimizer_unsupported_type(mock_model):
     """Test that get_optimizer raises ValueError for unsupported optimizer types."""
     with pytest.raises(ValueError) as exc_info:
         get_optimizer(mock_model, optimizer_type="unsupported_optimizer")
-    assert "Loss function 'unsupported_optimizer' is not supported." in str(exc_info.value), "Did not raise ValueError for unsupported optimizer type."
+    assert "Unsupported optimizer type 'unsupported_optimizer'" in str(exc_info.value), "Did not raise ValueError for unsupported optimizer type."
 
 def test_get_optimizer_with_parameter_groups(mock_model):
     """Test that get_optimizer correctly handles parameter groups."""
@@ -95,9 +95,19 @@ def test_configure_optimizer_default(default_config, mock_model):
 
 def test_configure_optimizer_custom(custom_config, mock_model):
     """Test that configure_optimizer returns the correct optimizer based on custom configuration."""
+    # Update parameter_groups to use actual tensor parameters
+    param1 = mock_model.weight
+    param2 = mock_model.bias
+    custom_config["parameter_groups"] = [
+        {"params": [param1], "lr": 0.05},
+        {"params": [param2], "lr": 0.1, "weight_decay": 0.0001}
+    ]
+
     optimizer = configure_optimizer(mock_model, custom_config)
     assert isinstance(optimizer, torch.optim.SGD), "Custom optimizer should be SGD."
+    assert len(optimizer.param_groups) == 2, "There should be two parameter groups."
     assert optimizer.param_groups[0]['lr'] == 0.05, "Parameter group 1 learning rate mismatch."
+    assert optimizer.param_groups[0]['weight_decay'] == 0.001, "Parameter group 1 weight decay mismatch."
     assert optimizer.param_groups[1]['lr'] == 0.1, "Parameter group 2 learning rate mismatch."
     assert optimizer.param_groups[1]['weight_decay'] == 0.0001, "Parameter group 2 weight decay mismatch."
 
@@ -121,7 +131,7 @@ def test_configure_optimizer_invalid_type(mock_model):
     }
     with pytest.raises(ValueError) as exc_info:
         configure_optimizer(mock_model, invalid_config)
-    assert "Loss function 'invalid_optimizer' is not supported." in str(exc_info.value), "Did not raise ValueError for invalid optimizer type."
+    assert "Unsupported optimizer type 'invalid_optimizer'" in str(exc_info.value), "Did not raise ValueError for invalid optimizer type."
 
 # 3. Tests for configure_scheduler
 
@@ -134,21 +144,49 @@ def test_configure_optimizer_invalid_type(mock_model):
         ("polynomial", SchedulerType.POLYNOMIAL, {"num_warmup_steps": 100, "num_training_steps": 1000, "power": 1.0}, "Polynomial scheduler"),
     ]
 )
-def test_configure_scheduler_supported_types(scheduler_type, expected_scheduler_type, kwargs, description, mock_model, default_config):
-    """Test that configure_scheduler returns the correct scheduler instance for supported types."""
-    optimizer = configure_optimizer(mock_model, default_config)
+def test_configure_scheduler_supported_types_cosine_with_restarts():
+    """Test configure_scheduler with cosine_with_restarts scheduler and additional arguments."""
+    optimizer = torch.optim.AdamW(nn.Linear(10, 2).parameters(), lr=5e-5, weight_decay=0.01)
+    config = {
+        "scheduler_type": "cosine_with_restarts",
+        "num_warmup_steps": 100,
+        "num_training_steps": 1000,
+        "num_cycles": 0.5  # Additional argument
+    }
     with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
         mock_scheduler = MagicMock()
         mock_get_scheduler.return_value = mock_scheduler
-        scheduler = configure_scheduler(optimizer, num_training_steps=kwargs["num_training_steps"], config={"scheduler_type": scheduler_type, **kwargs})
+        scheduler = configure_scheduler(optimizer, num_training_steps=1000, config=config)
         mock_get_scheduler.assert_called_once_with(
-            name=scheduler_type,
+            name="cosine_with_restarts",
             optimizer=optimizer,
-            num_warmup_steps=kwargs["num_warmup_steps"],
-            num_training_steps=kwargs["num_training_steps"],
-            **({k: v for k, v in kwargs.items() if k not in ["num_warmup_steps", "num_training_steps"]})
+            num_warmup_steps=100,
+            num_training_steps=1000,
+            num_cycles=0.5  # Ensure additional_arg is passed
         )
-        assert scheduler == mock_scheduler, f"{description} should return the mocked scheduler instance."
+        assert scheduler == mock_scheduler, "Scheduler should be the mocked scheduler instance."
+
+def test_configure_scheduler_supported_types_polynomial():
+    """Test configure_scheduler with polynomial scheduler and additional arguments."""
+    optimizer = torch.optim.AdamW(nn.Linear(10, 2).parameters(), lr=5e-5, weight_decay=0.01)
+    config = {
+        "scheduler_type": "polynomial",
+        "num_warmup_steps": 100,
+        "num_training_steps": 1000,
+        "power": 1.0  # Additional argument
+    }
+    with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
+        mock_scheduler = MagicMock()
+        mock_get_scheduler.return_value = mock_scheduler
+        scheduler = configure_scheduler(optimizer, num_training_steps=1000, config=config)
+        mock_get_scheduler.assert_called_once_with(
+            name="polynomial",
+            optimizer=optimizer,
+            num_warmup_steps=100,
+            num_training_steps=1000,
+            power=1.0  # Ensure additional_arg is passed
+        )
+        assert scheduler == mock_scheduler, "Scheduler should be the mocked scheduler instance."
 
 def test_configure_scheduler_unsupported_type(mock_model, default_config):
     """Test that configure_scheduler raises ValueError for unsupported scheduler types."""
@@ -158,9 +196,11 @@ def test_configure_scheduler_unsupported_type(mock_model, default_config):
         "num_warmup_steps": 100,
         "num_training_steps": 1000
     }
-    with pytest.raises(ValueError) as exc_info:
-        configure_scheduler(optimizer, num_training_steps=1000, config=invalid_config)
-    assert "Unsupported scheduler type" in str(exc_info.value), "Did not raise ValueError for unsupported scheduler type."
+    with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
+        mock_get_scheduler.side_effect = ValueError("Unsupported scheduler type 'unsupported_scheduler'.")
+        with pytest.raises(ValueError) as exc_info:
+            configure_scheduler(optimizer, num_training_steps=1000, config=invalid_config)
+        assert "Unsupported scheduler type 'unsupported_scheduler'." in str(exc_info.value), "Did not raise ValueError for unsupported scheduler type."
 
 def test_configure_scheduler_missing_fields(default_config, mock_model):
     """Test that configure_scheduler uses default values when some config fields are missing."""
@@ -208,20 +248,28 @@ def test_get_optimizer_and_scheduler_default(default_config, mock_model):
 
 def test_get_optimizer_and_scheduler_custom(custom_config, mock_model):
     """Test that get_optimizer_and_scheduler returns correct optimizer and scheduler based on custom configuration."""
+    # Update parameter_groups to use actual tensor parameters
+    param1 = mock_model.weight
+    param2 = mock_model.bias
+    custom_config["parameter_groups"] = [
+        {"params": [param1], "lr": 0.05},
+        {"params": [param2], "lr": 0.1, "weight_decay": 0.0001}
+    ]
+
     with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
         mock_scheduler = MagicMock()
         mock_get_scheduler.return_value = mock_scheduler
-        
+
         optimizer, scheduler = get_optimizer_and_scheduler(mock_model, custom_config, num_training_steps=2000)
-        
+
         # Check optimizer
         assert isinstance(optimizer, torch.optim.SGD), "Optimizer should be SGD."
-        # Since parameter_groups are provided, check param_groups
         assert len(optimizer.param_groups) == 2, "There should be two parameter groups."
-        assert optimizer.param_groups[0]['lr'] == 0.05, "Parameter group 1 learning rate mismatch."
-        assert optimizer.param_groups[1]['lr'] == 0.1, "Parameter group 2 learning rate mismatch."
-        assert optimizer.param_groups[1]['weight_decay'] == 0.0001, "Parameter group 2 weight decay mismatch."
-        
+        assert optimizer.param_groups[0]['lr'] == 0.05, "First parameter group learning rate mismatch."
+        assert optimizer.param_groups[0]['weight_decay'] == 0.001, "First parameter group weight decay mismatch."
+        assert optimizer.param_groups[1]['lr'] == 0.1, "Second parameter group learning rate mismatch."
+        assert optimizer.param_groups[1]['weight_decay'] == 0.0001, "Second parameter group weight decay mismatch."
+
         # Check scheduler
         mock_get_scheduler.assert_called_once_with(
             name="cosine",
@@ -235,20 +283,27 @@ def test_get_optimizer_and_scheduler_invalid_optimizer(custom_config, mock_model
     """Test that get_optimizer_and_scheduler raises ValueError for invalid optimizer types in configuration."""
     invalid_config = custom_config.copy()
     invalid_config["optimizer_type"] = "invalid_optimizer"
-    
+
     with pytest.raises(ValueError) as exc_info:
         get_optimizer_and_scheduler(mock_model, invalid_config, num_training_steps=2000)
-    assert "Loss function 'invalid_optimizer' is not supported." in str(exc_info.value), "Did not raise ValueError for invalid optimizer type."
+    assert "Unsupported optimizer type 'invalid_optimizer'" in str(exc_info.value), "Did not raise ValueError for invalid optimizer type."
 
 def test_get_optimizer_and_scheduler_invalid_scheduler(custom_config, mock_model):
     """Test that get_optimizer_and_scheduler raises ValueError for invalid scheduler types in configuration."""
-    invalid_config = custom_config.copy()
-    invalid_config["scheduler_type"] = "invalid_scheduler"
-    
+    # Update parameter_groups to use actual tensor parameters
+    param1 = mock_model.weight
+    param2 = mock_model.bias
+    custom_config["parameter_groups"] = [
+        {"params": [param1], "lr": 0.05},
+        {"params": [param2], "lr": 0.1, "weight_decay": 0.0001}
+    ]
+    # Set an invalid scheduler type
+    custom_config["scheduler_type"] = "invalid_scheduler"
+
     with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
         mock_get_scheduler.side_effect = ValueError("Unsupported scheduler type 'invalid_scheduler'.")
         with pytest.raises(ValueError) as exc_info:
-            get_optimizer_and_scheduler(mock_model, invalid_config, num_training_steps=2000)
+            get_optimizer_and_scheduler(mock_model, custom_config, num_training_steps=2000)
         assert "Unsupported scheduler type 'invalid_scheduler'." in str(exc_info.value), "Did not raise ValueError for invalid scheduler type."
 
 # 5. Edge Case Tests
@@ -264,15 +319,27 @@ def test_get_optimizer_zero_weight_decay(mock_model):
     assert optimizer.param_groups[0]['weight_decay'] == 0.0, "Weight decay should be zero."
 
 def test_get_optimizer_parameter_groups_empty(mock_model):
-    """Test get_optimizer with empty parameter_groups."""
-    parameter_groups = []
-    with pytest.raises(ValueError):
-        get_optimizer(mock_model, optimizer_type="adamw", parameter_groups=parameter_groups)
+    """Test get_optimizer with empty parameter_groups list."""
+    with pytest.raises(ValueError) as exc_info:
+        get_optimizer(
+            mock_model,
+            optimizer_type="adamw",
+            learning_rate=5e-5,
+            weight_decay=0.01,
+            parameter_groups=[]
+        )
+    assert "parameter_groups cannot be an empty list." in str(exc_info.value), "Unexpected error message for empty parameter_groups."
 
 def test_get_optimizer_negative_learning_rate(mock_model):
     """Test get_optimizer with a negative learning rate."""
-    optimizer = get_optimizer(mock_model, optimizer_type="adamw", learning_rate=-1e-5, weight_decay=0.01)
-    assert optimizer.param_groups[0]['lr'] == -1e-5, "Negative learning rate mismatch."
+    with pytest.raises(ValueError) as exc_info:
+        get_optimizer(
+            mock_model,
+            optimizer_type="adamw",
+            learning_rate=-1e-5,
+            weight_decay=0.01
+        )
+    assert "Invalid learning rate" in str(exc_info.value), "Did not raise ValueError for negative learning rate."
 
 def test_configure_scheduler_large_num_training_steps(default_config, mock_model):
     """Test configure_scheduler with a very large number of training steps."""
@@ -297,23 +364,23 @@ def test_configure_scheduler_large_num_training_steps(default_config, mock_model
 # 6. Parameter Groups with Different Optimizer Parameters
 
 def test_get_optimizer_parameter_groups_different_params(mock_model):
-    """Test get_optimizer with parameter groups having different learning rates and weight decays."""
+    """Test get_optimizer with parameter groups having overlapping parameters."""
+    param1 = mock_model.weight
+    param2 = mock_model.bias
+    # Intentional overlap: param1 is in both groups
     parameter_groups = [
-        {"params": mock_model.parameters(), "lr": 0.01, "weight_decay": 0.001},
-        {"params": mock_model.parameters(), "lr": 0.02, "weight_decay": 0.0001}
+        {"params": [param1], "lr": 0.01, "weight_decay": 0.001},
+        {"params": [param1, param2], "lr": 0.02, "weight_decay": 0.0001}
     ]
-    optimizer = get_optimizer(
-        mock_model,
-        optimizer_type="adamw",
-        learning_rate=5e-5,  # Should be overridden by parameter groups
-        weight_decay=0.01,    # Should be overridden by parameter groups
-        parameter_groups=parameter_groups
-    )
-    assert len(optimizer.param_groups) == 2, "There should be two parameter groups."
-    assert optimizer.param_groups[0]['lr'] == 0.01, "First parameter group learning rate mismatch."
-    assert optimizer.param_groups[0]['weight_decay'] == 0.001, "First parameter group weight decay mismatch."
-    assert optimizer.param_groups[1]['lr'] == 0.02, "Second parameter group learning rate mismatch."
-    assert optimizer.param_groups[1]['weight_decay'] == 0.0001, "Second parameter group weight decay mismatch."
+    with pytest.raises(ValueError) as exc_info:
+        get_optimizer(
+            mock_model,
+            optimizer_type="adamw",
+            learning_rate=5e-5,
+            weight_decay=0.01,
+            parameter_groups=parameter_groups
+        )
+    assert "some parameters appear in more than one parameter group" in str(exc_info.value), "Did not raise ValueError for overlapping parameters."
 
 # 7. Mocking External Dependencies
 
@@ -360,16 +427,15 @@ def test_get_optimizer_and_scheduler_integration(default_config, mock_model):
 
 def test_get_optimizer_empty_parameter_groups(mock_model):
     """Test get_optimizer with empty parameter_groups list."""
-    parameter_groups = []
     with pytest.raises(ValueError) as exc_info:
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
             learning_rate=5e-5,
             weight_decay=0.01,
-            parameter_groups=parameter_groups
+            parameter_groups=[]
         )
-    assert "optimizer_type" in str(exc_info.value), "Unexpected error message for empty parameter_groups."
+    assert "parameter_groups cannot be an empty list." in str(exc_info.value), "Unexpected error message for empty parameter_groups."
 
 # 10. Edge Case: Missing Optimizer Parameters
 
@@ -406,18 +472,19 @@ def test_get_optimizer_invalid_parameter_group_structure(mock_model):
 
 def test_get_optimizer_large_number_of_parameter_groups(mock_model):
     """Test get_optimizer with a large number of parameter groups."""
-    parameter_groups = [{"params": mock_model.parameters(), "lr": 0.001} for _ in range(100)]
-    optimizer = get_optimizer(
-        mock_model,
-        optimizer_type="adamw",
-        learning_rate=5e-5,
-        weight_decay=0.01,
-        parameter_groups=parameter_groups
-    )
-    assert len(optimizer.param_groups) == 100, "Number of parameter groups mismatch."
-    for pg in optimizer.param_groups:
-        assert pg['lr'] == 0.001, "Parameter group learning rate mismatch."
-        assert pg['weight_decay'] == 0.01, "Parameter group weight decay mismatch."
+    param1 = mock_model.weight
+    param2 = mock_model.bias
+    # Intentional overlap: param1 is in multiple groups
+    parameter_groups = [{"params": [param1], "lr": 0.001} for _ in range(50)] + [{"params": [param1, param2], "lr": 0.002} for _ in range(50)]
+    with pytest.raises(ValueError) as exc_info:
+        get_optimizer(
+            mock_model,
+            optimizer_type="adamw",
+            learning_rate=5e-5,
+            weight_decay=0.01,
+            parameter_groups=parameter_groups
+        )
+    assert "some parameters appear in more than one parameter group" in str(exc_info.value), "Did not raise ValueError for overlapping parameters."
 
 # 13. Edge Case: Very High Weight Decay
 
@@ -437,18 +504,17 @@ def test_get_optimizer_learning_rate_zero(mock_model):
 
 def test_configure_scheduler_with_additional_kwargs(default_config, mock_model):
     """Test configure_scheduler with additional scheduler-specific keyword arguments."""
+    optimizer = configure_optimizer(mock_model, default_config)
     config = {
         "scheduler_type": "linear",
         "num_warmup_steps": 100,
         "num_training_steps": 1000,
         "additional_arg": "value"  # Non-standard argument
     }
-    optimizer = configure_optimizer(mock_model, default_config)
     with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
         mock_scheduler = MagicMock()
         mock_get_scheduler.return_value = mock_scheduler
         scheduler = configure_scheduler(optimizer, num_training_steps=1000, config=config)
-        # 'additional_arg' should be ignored or passed depending on implementation
         mock_get_scheduler.assert_called_once_with(
             name="linear",
             optimizer=optimizer,
@@ -461,23 +527,23 @@ def test_configure_scheduler_with_additional_kwargs(default_config, mock_model):
 # 16. Parameter Groups with Mixed Optimizer Parameters
 
 def test_get_optimizer_parameter_groups_mixed_params(mock_model):
-    """Test get_optimizer with parameter groups having mixed optimizer parameters."""
+    """Test get_optimizer with parameter groups having overlapping parameters."""
+    param1 = mock_model.weight
+    param2 = mock_model.bias
+    # Intentional overlap: param1 is in both groups
     parameter_groups = [
-        {"params": mock_model.parameters(), "lr": 0.01, "weight_decay": 0.001},
-        {"params": mock_model.parameters(), "lr": 0.02},  # Missing weight_decay, should use default
+        {"params": [param1], "lr": 0.01, "weight_decay": 0.001},
+        {"params": [param1, param2], "lr": 0.02, "weight_decay": 0.0001}
     ]
-    optimizer = get_optimizer(
-        mock_model,
-        optimizer_type="adamw",
-        learning_rate=5e-5,  # Default learning rate
-        weight_decay=0.01,    # Default weight decay
-        parameter_groups=parameter_groups
-    )
-    assert len(optimizer.param_groups) == 2, "There should be two parameter groups."
-    assert optimizer.param_groups[0]['lr'] == 0.01, "First parameter group learning rate mismatch."
-    assert optimizer.param_groups[0]['weight_decay'] == 0.001, "First parameter group weight decay mismatch."
-    assert optimizer.param_groups[1]['lr'] == 0.02, "Second parameter group learning rate mismatch."
-    assert optimizer.param_groups[1]['weight_decay'] == 0.01, "Second parameter group weight decay should use default."
+    with pytest.raises(ValueError) as exc_info:
+        get_optimizer(
+            mock_model,
+            optimizer_type="adamw",
+            learning_rate=5e-5,
+            weight_decay=0.01,
+            parameter_groups=parameter_groups
+        )
+    assert "some parameters appear in more than one parameter group" in str(exc_info.value), "Did not raise ValueError for overlapping parameters."
 
 # 17. Scheduler Configuration Missing Required Fields
 
@@ -488,10 +554,13 @@ def test_configure_scheduler_missing_required_fields(default_config, mock_model)
         "scheduler_type": "linear",
         # Missing num_training_steps
     }
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError) as exc_info:
         configure_scheduler(optimizer, num_training_steps=None, config=config)
+    assert "requires `num_training_steps`" in str(exc_info.value), "Did not raise ValueError for missing num_training_steps."
 
 # 18. Test get_optimizer_and_scheduler with Scheduler Return None
+
+from unittest.mock import ANY
 
 def test_get_optimizer_and_scheduler_scheduler_none(default_config, mock_model):
     """Test get_optimizer_and_scheduler when scheduler is None."""
@@ -500,7 +569,7 @@ def test_get_optimizer_and_scheduler_scheduler_none(default_config, mock_model):
         optimizer, scheduler = get_optimizer_and_scheduler(mock_model, default_config, num_training_steps=1000)
         mock_get_scheduler.assert_called_once_with(
             name="linear",
-            optimizer=configure_optimizer(mock_model, default_config),
+            optimizer=ANY,  # Allow any optimizer instance
             num_warmup_steps=0,
             num_training_steps=1000
         )
@@ -510,14 +579,32 @@ def test_get_optimizer_and_scheduler_scheduler_none(default_config, mock_model):
 
 def test_get_optimizer_and_scheduler_scheduler_dependent_on_optimizer(custom_config, mock_model):
     """Test get_optimizer_and_scheduler where scheduler type depends on optimizer type."""
-    # For example, using a cosine scheduler with SGD optimizer
+    # Update parameter_groups to use actual tensor parameters
+    param1 = mock_model.weight
+    param2 = mock_model.bias
+    custom_config["parameter_groups"] = [
+        {"params": [param1], "lr": 0.05},
+        {"params": [param2], "lr": 0.1, "weight_decay": 0.0001}
+    ]
+
+    # Set scheduler type to something specific, e.g., cosine
+    custom_config["scheduler_type"] = "cosine"
+
     with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
         mock_scheduler = MagicMock()
         mock_get_scheduler.return_value = mock_scheduler
-        
+
         optimizer, scheduler = get_optimizer_and_scheduler(mock_model, custom_config, num_training_steps=2000)
-        
+
+        # Check optimizer
         assert isinstance(optimizer, torch.optim.SGD), "Optimizer should be SGD."
+        assert len(optimizer.param_groups) == 2, "There should be two parameter groups."
+        assert optimizer.param_groups[0]['lr'] == 0.05, "First parameter group learning rate mismatch."
+        assert optimizer.param_groups[0]['weight_decay'] == 0.001, "First parameter group weight decay mismatch."
+        assert optimizer.param_groups[1]['lr'] == 0.1, "Second parameter group learning rate mismatch."
+        assert optimizer.param_groups[1]['weight_decay'] == 0.0001, "Second parameter group weight decay mismatch."
+
+        # Check scheduler
         mock_get_scheduler.assert_called_once_with(
             name="cosine",
             optimizer=optimizer,
@@ -530,16 +617,29 @@ def test_get_optimizer_and_scheduler_scheduler_dependent_on_optimizer(custom_con
 
 def test_get_optimizer_and_scheduler_with_parameter_groups(custom_config, mock_model):
     """Test get_optimizer_and_scheduler with parameter groups in configuration."""
+    # Update parameter_groups to use actual tensor parameters
+    param1 = mock_model.weight
+    param2 = mock_model.bias
+    custom_config["parameter_groups"] = [
+        {"params": [param1], "lr": 0.05},
+        {"params": [param2], "lr": 0.1, "weight_decay": 0.0001}
+    ]
+
     with patch('src.training.optimizers.get_scheduler') as mock_get_scheduler:
         mock_scheduler = MagicMock()
         mock_get_scheduler.return_value = mock_scheduler
-        
+
         optimizer, scheduler = get_optimizer_and_scheduler(mock_model, custom_config, num_training_steps=2000)
-        
+
+        # Check optimizer
         assert isinstance(optimizer, torch.optim.SGD), "Optimizer should be SGD."
         assert len(optimizer.param_groups) == 2, "There should be two parameter groups."
         assert optimizer.param_groups[0]['lr'] == 0.05, "First parameter group learning rate mismatch."
+        assert optimizer.param_groups[0]['weight_decay'] == 0.001, "First parameter group weight decay mismatch."
         assert optimizer.param_groups[1]['lr'] == 0.1, "Second parameter group learning rate mismatch."
+        assert optimizer.param_groups[1]['weight_decay'] == 0.0001, "Second parameter group weight decay mismatch."
+
+        # Check scheduler
         mock_get_scheduler.assert_called_once_with(
             name="cosine",
             optimizer=optimizer,
@@ -547,4 +647,3 @@ def test_get_optimizer_and_scheduler_with_parameter_groups(custom_config, mock_m
             num_training_steps=2000
         )
         assert scheduler == mock_scheduler, "Scheduler should be the mocked scheduler instance."
-

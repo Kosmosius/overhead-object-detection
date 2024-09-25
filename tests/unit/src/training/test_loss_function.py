@@ -332,17 +332,13 @@ def test_compute_loss_custom_loss_weights(mock_outputs, mock_targets):
         'pred_boxes': torch.randn(4, 4, requires_grad=True)
     }
     targets = [
-        {'labels': torch.randint(0, 5, (1, 5), dtype=torch.long), 'boxes': torch.randn(1, 4)},
-        {'labels': torch.randint(0, 5, (1, 5), dtype=torch.long), 'boxes': torch.randn(1, 4)},
-        {'labels': torch.randint(0, 5, (1, 5), dtype=torch.long), 'boxes': torch.randn(1, 4)},
-        {'labels': torch.randint(0, 5, (1, 5), dtype=torch.long), 'boxes': torch.randn(1, 4)}
+        {'labels': torch.randn(4, 5), 'boxes': torch.randn(4, 4)}
     ]
 
     loss = compute_loss(outputs, targets, model=None, loss_config=loss_config)
 
-    # One-hot encode labels for MSELoss with num_classes matching logits
-    num_classes = outputs['logits'].size(1)  # 5 classes
-    labels = torch.nn.functional.one_hot(torch.cat([t['labels'] for t in targets]), num_classes=num_classes).float()
+    # No one-hot encoding; labels should match logits shape for MSELoss
+    labels = torch.cat([t['labels'] for t in targets]).float()  # Shape: [4,5]
 
     # Compute expected individual losses
     classification_loss = nn.MSELoss(reduction="sum")(outputs['logits'], labels).item()
@@ -377,12 +373,11 @@ def test_compute_loss_custom_loss_weights_with_custom_config(mock_outputs, mock_
 
     loss = compute_loss(mock_outputs, mock_targets, model=None, loss_config=loss_config)
 
-    # One-hot encode labels for MSELoss with num_classes matching logits
-    num_classes = mock_outputs['logits'].size(1)  # Corrected variable reference
-    labels_one_hot = torch.nn.functional.one_hot(torch.cat([t['labels'] for t in mock_targets]), num_classes=num_classes).float()
+    # No one-hot encoding; labels should match logits shape for MSELoss
+    labels = torch.cat([t['labels'] for t in mock_targets]).float()  # Shape: [4,5]
 
     # Compute expected individual losses
-    classification_loss = nn.MSELoss(reduction="sum")(mock_outputs['logits'], labels_one_hot).item()
+    classification_loss = nn.MSELoss(reduction="sum")(mock_outputs['logits'], labels).item()
     bbox_loss = nn.SmoothL1Loss()(mock_outputs['pred_boxes'], torch.cat([t['boxes'] for t in mock_targets])).item()
 
     # Apply weights

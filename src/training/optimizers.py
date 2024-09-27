@@ -28,6 +28,7 @@ def get_optimizer(
 ) -> torch.optim.Optimizer:
     """
     Return the appropriate optimizer for the given model.
+
     Args:
         model (torch.nn.Module): The model being trained.
         optimizer_type (str): The type of optimizer to use ('adamw', 'adam', 'sgd', or 'rmsprop').
@@ -36,10 +37,13 @@ def get_optimizer(
         parameter_groups (List[Dict[str, Any]], optional):
             Optional list of parameter groups with specific learning rates or optimizations.
         **kwargs: Additional keyword arguments for optimizer initialization.
+
     Returns:
         torch.optim.Optimizer: The initialized optimizer.
+
     Raises:
         ValueError: If the optimizer type is unsupported or parameter_groups are invalid.
+        TypeError: If a parameter group contains non-Parameter elements.
     """
     optimizer_type = optimizer_type.lower()
     optimizers = {
@@ -115,7 +119,7 @@ def configure_optimizer(model: torch.nn.Module, config: Dict[str, Any]) -> torch
     return get_optimizer(
         model=model,
         optimizer_type=config.get("optimizer_type", "adamw"),
-        learning_rate=config.get("learning_rate", 5e-5),
+        lr=config.get("lr", 5e-5),
         weight_decay=config.get("weight_decay", 0.01),
         parameter_groups=config.get("parameter_groups", None)
     )

@@ -24,7 +24,7 @@ def default_config():
     """Fixture for default optimizer and scheduler configuration."""
     return {
         "optimizer_type": "adamw",
-        "learning_rate": 5e-5,
+        "lr": 5e-5,  # Changed from 'learning_rate' to 'lr'
         "weight_decay": 0.01,
         "scheduler_type": "linear",
         "num_warmup_steps": 0
@@ -35,13 +35,13 @@ def custom_config():
     """Fixture for custom optimizer and scheduler configuration."""
     return {
         "optimizer_type": "sgd",
-        "learning_rate": 0.1,
+        "lr": 0.1,  # Changed from 'learning_rate' to 'lr'
         "weight_decay": 0.001,
         "scheduler_type": "cosine",
         "num_warmup_steps": 100,
         "parameter_groups": [
-            {"params": "group1", "lr": 0.05},
-            {"params": "group2", "lr": 0.1, "weight_decay": 0.0001}
+            {"params": "group1", "lr": 0.05},  # Changed to use 'lr'
+            {"params": "group2", "lr": 0.1, "weight_decay": 0.0001}  # Changed to use 'lr'
         ]
     }
 
@@ -52,24 +52,15 @@ def custom_config():
 @pytest.mark.parametrize(
     "optimizer_type, expected_class, kwargs, description",
     [
-        ("adamw", torch.optim.AdamW, {"learning_rate": 5e-5, "weight_decay": 0.01}, "Default AdamW"),
-        ("adam", torch.optim.Adam, {"learning_rate": 1e-3, "weight_decay": 0.001}, "Adam with custom parameters"),
-        ("sgd", torch.optim.SGD, {"learning_rate": 0.1, "weight_decay": 0.0005, "momentum": 0.9}, "SGD with momentum"),
-        ("rmsprop", torch.optim.RMSprop, {"learning_rate": 0.01, "weight_decay": 0.0001, "momentum": 0.9}, "RMSprop with momentum"),
+        ("adamw", torch.optim.AdamW, {"lr": 5e-5, "weight_decay": 0.01}, "Default AdamW"),
+        ("adam", torch.optim.Adam, {"lr": 1e-3, "weight_decay": 0.001}, "Adam with custom parameters"),
+        ("sgd", torch.optim.SGD, {"lr": 0.1, "weight_decay": 0.0005, "momentum": 0.9}, "SGD with momentum"),
+        ("rmsprop", torch.optim.RMSprop, {"lr": 0.01, "weight_decay": 0.0001, "momentum": 0.9}, "RMSprop with momentum"),
     ]
 )
 def test_get_optimizer_supported_types(optimizer_type, expected_class, kwargs, description, mock_model):
     """Test that get_optimizer returns the correct optimizer instance for supported types."""
-    # Extract learning_rate and weight_decay from kwargs
-    learning_rate = kwargs.pop('learning_rate', 5e-5)
-    weight_decay = kwargs.pop('weight_decay', 0.01)
-    optimizer = get_optimizer(
-        mock_model,
-        optimizer_type=optimizer_type,
-        learning_rate=learning_rate,
-        weight_decay=weight_decay,
-        **kwargs
-    )
+    optimizer = get_optimizer(mock_model, optimizer_type=optimizer_type, **kwargs)
     assert isinstance(optimizer, expected_class), f"{description} should be an instance of {expected_class.__name__}."
 
 def test_get_optimizer_unsupported_type(mock_model):
@@ -86,7 +77,7 @@ def test_get_optimizer_with_parameter_groups(mock_model):
     optimizer = get_optimizer(
         mock_model,
         optimizer_type="adamw",
-        learning_rate=5e-5,
+        lr=5e-5,
         weight_decay=0.01,
         parameter_groups=parameter_groups
     )
@@ -99,7 +90,7 @@ def test_get_optimizer_parameter_groups_empty(mock_model):
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
-            learning_rate=5e-5,
+            lr=5e-5,
             weight_decay=0.01,
             parameter_groups=[]
         )
@@ -111,7 +102,7 @@ def test_configure_optimizer_default(default_config, mock_model):
     """Test that configure_optimizer returns the correct optimizer based on default configuration."""
     optimizer = configure_optimizer(mock_model, default_config)
     assert isinstance(optimizer, torch.optim.AdamW), "Default optimizer should be AdamW."
-    assert optimizer.param_groups[0]['lr'] == default_config["learning_rate"], "Learning rate mismatch."
+    assert optimizer.param_groups[0]['lr'] == default_config["lr"], "Learning rate mismatch."
     assert optimizer.param_groups[0]['weight_decay'] == default_config["weight_decay"], "Weight decay mismatch."
 
 def test_configure_optimizer_custom(custom_config, mock_model):
@@ -120,7 +111,7 @@ def test_configure_optimizer_custom(custom_config, mock_model):
     param1 = mock_model.weight
     param2 = mock_model.bias
     custom_config["parameter_groups"] = [
-        {"params": [param1], "lr": 0.05, "weight_decay": 0.001},  # Include weight_decay
+        {"params": [param1], "lr": 0.05, "weight_decay": 0.001},
         {"params": [param2], "lr": 0.1, "weight_decay": 0.0001}
     ]
 
@@ -136,7 +127,7 @@ def test_configure_optimizer_missing_fields(default_config, mock_model):
     """Test that configure_optimizer uses default values when some config fields are missing."""
     partial_config = {
         "optimizer_type": "adam",
-        # Missing learning_rate and weight_decay
+        # Missing 'lr' and 'weight_decay'
     }
     optimizer = configure_optimizer(mock_model, partial_config)
     assert isinstance(optimizer, torch.optim.Adam), "Optimizer should be Adam."
@@ -147,7 +138,7 @@ def test_configure_optimizer_invalid_type(mock_model):
     """Test that configure_optimizer raises ValueError for invalid optimizer types in config."""
     invalid_config = {
         "optimizer_type": "invalid_optimizer",
-        "learning_rate": 1e-3,
+        "lr": 1e-3,
         "weight_decay": 0.01
     }
     with pytest.raises(ValueError) as exc_info:
@@ -241,8 +232,8 @@ def test_configure_scheduler_missing_fields(default_config, mock_model):
     optimizer = configure_optimizer(mock_model, default_config)
     config = {
         "scheduler_type": "linear",
-        # Missing num_warmup_steps
-        # Missing num_training_steps
+        # Missing 'num_warmup_steps'
+        # Missing 'num_training_steps'
     }
     with pytest.raises(ValueError) as exc_info:
         configure_scheduler(optimizer, num_training_steps=None, config=config)
@@ -260,7 +251,7 @@ def test_get_optimizer_and_scheduler_default(default_config, mock_model):
 
         # Check optimizer
         assert isinstance(optimizer, torch.optim.AdamW), "Optimizer should be AdamW."
-        assert optimizer.param_groups[0]['lr'] == default_config["learning_rate"], "Learning rate mismatch."
+        assert optimizer.param_groups[0]['lr'] == default_config["lr"], "Learning rate mismatch."
         assert optimizer.param_groups[0]['weight_decay'] == default_config["weight_decay"], "Weight decay mismatch."
 
         # Check scheduler
@@ -278,7 +269,7 @@ def test_get_optimizer_and_scheduler_custom(custom_config, mock_model):
     param1 = mock_model.weight
     param2 = mock_model.bias
     custom_config["parameter_groups"] = [
-        {"params": [param1], "lr": 0.05, "weight_decay": 0.001},  # Include weight_decay
+        {"params": [param1], "lr": 0.05, "weight_decay": 0.001},
         {"params": [param2], "lr": 0.1, "weight_decay": 0.0001}
     ]
 
@@ -291,10 +282,10 @@ def test_get_optimizer_and_scheduler_custom(custom_config, mock_model):
         # Check optimizer
         assert isinstance(optimizer, torch.optim.SGD), "Optimizer should be SGD."
         assert len(optimizer.param_groups) == 2, "There should be two parameter groups."
-        assert optimizer.param_groups[0]['lr'] == 0.05, "First parameter group learning rate mismatch."
-        assert optimizer.param_groups[0]['weight_decay'] == 0.001, "First parameter group weight decay mismatch."
-        assert optimizer.param_groups[1]['lr'] == 0.1, "Second parameter group learning rate mismatch."
-        assert optimizer.param_groups[1]['weight_decay'] == 0.0001, "Second parameter group weight decay mismatch."
+        assert optimizer.param_groups[0]['lr'] == 0.05, "Parameter group 1 learning rate mismatch."
+        assert optimizer.param_groups[0]['weight_decay'] == 0.001, "Parameter group 1 weight decay mismatch."
+        assert optimizer.param_groups[1]['lr'] == 0.1, "Parameter group 2 learning rate mismatch."
+        assert optimizer.param_groups[1]['weight_decay'] == 0.0001, "Parameter group 2 weight decay mismatch."
 
         # Check scheduler
         mock_get_scheduler.assert_called_once_with(
@@ -316,7 +307,7 @@ def test_get_optimizer_and_scheduler_invalid_optimizer(custom_config, mock_model
 
 def test_get_optimizer_and_scheduler_invalid_scheduler(custom_config, mock_model):
     """Test that get_optimizer_and_scheduler raises ValueError for invalid scheduler types in configuration."""
-    # Update parameter_groups to use actual tensor parameters
+    # Update parameter_groups to use actual tensor parameters and include weight_decay
     param1 = mock_model.weight
     param2 = mock_model.bias
     custom_config["parameter_groups"] = [
@@ -334,12 +325,12 @@ def test_get_optimizer_and_scheduler_invalid_scheduler(custom_config, mock_model
 
 def test_get_optimizer_extreme_learning_rate(mock_model):
     """Test get_optimizer with an extremely high learning rate."""
-    optimizer = get_optimizer(mock_model, optimizer_type="adamw", learning_rate=1.0, weight_decay=0.01)
+    optimizer = get_optimizer(mock_model, optimizer_type="adamw", lr=1.0, weight_decay=0.01)
     assert optimizer.param_groups[0]['lr'] == 1.0, "Extreme learning rate mismatch."
 
 def test_get_optimizer_zero_weight_decay(mock_model):
     """Test get_optimizer with zero weight decay."""
-    optimizer = get_optimizer(mock_model, optimizer_type="adamw", learning_rate=5e-5, weight_decay=0.0)
+    optimizer = get_optimizer(mock_model, optimizer_type="adamw", lr=5e-5, weight_decay=0.0)
     assert optimizer.param_groups[0]['weight_decay'] == 0.0, "Weight decay should be zero."
 
 def test_get_optimizer_negative_learning_rate(mock_model):
@@ -348,7 +339,7 @@ def test_get_optimizer_negative_learning_rate(mock_model):
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
-            learning_rate=-1e-5,
+            lr=-1e-5,
             weight_decay=0.01
         )
     assert "Invalid learning rate" in str(exc_info.value), "Did not raise ValueError for negative learning rate."
@@ -356,7 +347,12 @@ def test_get_optimizer_negative_learning_rate(mock_model):
 def test_get_optimizer_learning_rate_zero(mock_model):
     """Test get_optimizer with a learning rate of zero."""
     with pytest.raises(ValueError) as exc_info:
-        get_optimizer(mock_model, optimizer_type="adamw", learning_rate=0.0, weight_decay=0.01)
+        get_optimizer(
+            mock_model,
+            optimizer_type="adamw",
+            lr=0.0,
+            weight_decay=0.01
+        )
     assert "Invalid learning rate" in str(exc_info.value), "Did not raise ValueError for zero learning rate."
 
 def test_configure_scheduler_large_num_training_steps(default_config, mock_model):
@@ -394,7 +390,7 @@ def test_get_optimizer_parameter_groups_different_params(mock_model):
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
-            learning_rate=5e-5,
+            lr=5e-5,
             weight_decay=0.01,
             parameter_groups=parameter_groups
         )
@@ -429,7 +425,7 @@ def test_get_optimizer_and_scheduler_integration(default_config, mock_model):
 
         # Verify optimizer
         assert isinstance(optimizer, torch.optim.AdamW), "Optimizer should be AdamW."
-        assert optimizer.param_groups[0]['lr'] == default_config["learning_rate"], "Learning rate mismatch."
+        assert optimizer.param_groups[0]['lr'] == default_config["lr"], "Learning rate mismatch."
         assert optimizer.param_groups[0]['weight_decay'] == default_config["weight_decay"], "Weight decay mismatch."
 
         # Verify scheduler
@@ -449,7 +445,7 @@ def test_get_optimizer_empty_parameter_groups(mock_model):
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
-            learning_rate=5e-5,
+            lr=5e-5,
             weight_decay=0.01,
             parameter_groups=[]
         )
@@ -459,7 +455,7 @@ def test_get_optimizer_empty_parameter_groups(mock_model):
 
 def test_get_optimizer_missing_parameters(mock_model):
     """Test get_optimizer when essential parameters are missing."""
-    # Missing learning_rate and weight_decay should default to provided values
+    # Missing 'lr' and 'weight_decay' should default to provided values
     optimizer = get_optimizer(
         mock_model,
         optimizer_type="adamw"
@@ -481,7 +477,7 @@ def test_get_optimizer_invalid_parameter_group_structure(mock_model):
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
-            learning_rate=5e-5,
+            lr=5e-5,
             weight_decay=0.01,
             parameter_groups=parameter_groups
         )
@@ -499,7 +495,7 @@ def test_get_optimizer_large_number_of_parameter_groups(mock_model):
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
-            learning_rate=5e-5,
+            lr=5e-5,
             weight_decay=0.01,
             parameter_groups=parameter_groups
         )
@@ -509,7 +505,7 @@ def test_get_optimizer_large_number_of_parameter_groups(mock_model):
 
 def test_get_optimizer_very_high_weight_decay(mock_model):
     """Test get_optimizer with a very high weight decay."""
-    optimizer = get_optimizer(mock_model, optimizer_type="adamw", learning_rate=5e-5, weight_decay=10.0)
+    optimizer = get_optimizer(mock_model, optimizer_type="adamw", lr=5e-5, weight_decay=10.0)
     assert optimizer.param_groups[0]['weight_decay'] == 10.0, "Weight decay should be set to 10.0."
 
 # 14. Edge Case: Learning Rate Zero
@@ -520,7 +516,7 @@ def test_get_optimizer_learning_rate_zero(mock_model):
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
-            learning_rate=0.0,
+            lr=0.0,
             weight_decay=0.01
         )
     assert "Invalid learning rate" in str(exc_info.value), "Did not raise ValueError for zero learning rate."
@@ -564,7 +560,7 @@ def test_get_optimizer_parameter_groups_mixed_params(mock_model):
         get_optimizer(
             mock_model,
             optimizer_type="adamw",
-            learning_rate=5e-5,
+            lr=5e-5,
             weight_decay=0.01,
             parameter_groups=parameter_groups
         )
@@ -577,7 +573,7 @@ def test_configure_scheduler_missing_required_fields(default_config, mock_model)
     optimizer = configure_optimizer(mock_model, default_config)
     config = {
         "scheduler_type": "linear",
-        # Missing num_training_steps
+        # Missing 'num_training_steps'
     }
     with pytest.raises(ValueError) as exc_info:
         configure_scheduler(optimizer, num_training_steps=None, config=config)

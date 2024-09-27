@@ -3,7 +3,7 @@
 import torch
 from torch.optim import SGD, Adam, RMSprop, AdamW
 from transformers import get_scheduler, SchedulerType
-from typing import Optional, List, Dict, Any, Tuple, Union
+from typing import Optional, List, Dict, Any, Tuple
 from torch.optim.lr_scheduler import _LRScheduler
 
 # Define the mapping from SchedulerType to scheduler functions or string identifiers
@@ -77,7 +77,9 @@ def get_optimizer(
         # Ensure no overlapping parameters across groups
         seen_params = set()
         for group in parameter_groups:
-            params = group.get("params", [])
+            if "params" not in group:
+                raise ValueError("Each parameter group must have a 'params' list.")
+            params = group["params"]
             if not isinstance(params, list):
                 raise ValueError("Each parameter group must have a 'params' list.")
             for param in params:
@@ -129,10 +131,31 @@ def configure_scheduler(
     num_training_steps: Optional[int],
     config: Dict[str, Any]
 ) -> Optional[_LRScheduler]:
+    """
+    Configure the scheduler from a configuration file.
+
+    Args:
+        optimizer (torch.optim.Optimizer): The optimizer for which the scheduler is being configured.
+        num_training_steps (int): The total number of training steps.
+        config (dict): Configuration for scheduler parameters.
+
+    Returns:
+        Optional[_LRScheduler]: Configured scheduler or None if not applicable.
+    """
     scheduler_type = config.get("scheduler_type", "linear")
     num_warmup_steps = config.get("num_warmup_steps", 0)
+    # Exclude scheduler-related and optimizer-related keys
+    excluded_keys = [
+        "scheduler_type",
+        "num_warmup_steps",
+        "num_training_steps",
+        "optimizer_type",
+        "lr",
+        "weight_decay",
+        "parameter_groups"
+    ]
     scheduler_specific_kwargs = {
-        k: v for k, v in config.items() if k not in ["scheduler_type", "num_warmup_steps", "num_training_steps"]
+        k: v for k, v in config.items() if k not in excluded_keys
     }
 
     try:

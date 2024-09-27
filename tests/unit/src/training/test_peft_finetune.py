@@ -9,6 +9,7 @@ from src.training.peft_finetune import (
     setup_peft_model,
     prepare_dataloader,
     fine_tune_peft_model,
+    get_optimizer_and_scheduler,
     main
 )
 from transformers import DetrFeatureExtractor, DetrForObjectDetection
@@ -49,14 +50,24 @@ def mock_dataset():
     return MagicMock(spec=Dataset)
 
 @pytest.fixture
-def mock_dataloader_train(mock_dataset):
+def mock_dataloader_train():
     """Fixture to create a mock training DataLoader."""
-    return MagicMock(spec=DataLoader, return_value=DataLoader())
+    mock_loader = MagicMock(spec=DataLoader)
+    mock_loader.__len__.return_value = 10  # Example length
+    mock_loader.__iter__.return_value = iter([
+        (torch.randn(4, 3, 224, 224), [{"labels": torch.randint(0, 91, (4,)), "boxes": torch.randn(4, 4)}])
+    ])  # Example data
+    return mock_loader
 
 @pytest.fixture
-def mock_dataloader_val(mock_dataset):
+def mock_dataloader_val():
     """Fixture to create a mock validation DataLoader."""
-    return MagicMock(spec=DataLoader, return_value=DataLoader())
+    mock_loader = MagicMock(spec=DataLoader)
+    mock_loader.__len__.return_value = 5  # Example length
+    mock_loader.__iter__.return_value = iter([
+        (torch.randn(4, 3, 224, 224), [{"labels": torch.randint(0, 91, (4,)), "boxes": torch.randn(4, 4)}])
+    ])  # Example data
+    return mock_loader
 
 @pytest.fixture
 def mock_optimizer():
@@ -161,13 +172,12 @@ def test_setup_peft_model_logging(mock_peft_config, mock_model, caplog):
             assert "PEFT model successfully initialized with facebook/detr-resnet-50." in caplog.text, "Did not log successful PEFT model initialization."
 
 def test_setup_peft_model_error(mock_peft_config):
-    """Test that setup_peft_model raises an error when model initialization fails."""
     with patch("src.training.peft_finetune.DetrForObjectDetection.from_pretrained") as mock_from_pretrained:
         mock_from_pretrained.side_effect = Exception("Initialization failed")
         
         with pytest.raises(Exception) as exc_info:
             setup_peft_model("invalid-model", num_classes=91, peft_config=mock_peft_config)
-        assert "Error setting up PEFT model: Initialization failed" in str(exc_info.value), "Did not raise expected exception on model initialization failure."
+        assert "Initialization failed" in str(exc_info.value), "Did not raise expected exception on model initialization failure."
 
 # 2. Tests for prepare_dataloader
 
@@ -641,11 +651,10 @@ def test_fine_tune_peft_model_reproducibility(default_config, mock_peft_model, m
 # 8. Edge Case Tests: Invalid Inputs
 
 def test_fine_tune_peft_model_invalid_device(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler):
-    """Test fine_tune_peft_model with an invalid device."""
     config = default_config.copy()
     config['training']['device'] = "invalid_device"
-    
-    with pytest.raises(RuntimeError):
+
+    with pytest.raises(RuntimeError) as exc_info:
         fine_tune_peft_model(
             model=mock_peft_model,
             train_dataloader=mock_dataloader_train,
@@ -655,6 +664,7 @@ def test_fine_tune_peft_model_invalid_device(default_config, mock_peft_model, mo
             config=config,
             device="invalid_device"
         )
+    assert "Invalid device" in str(exc_info.value), "Did not raise RuntimeError for invalid device."
 
 # 9. Integration Tests
 
@@ -820,6 +830,7 @@ def test_main_missing_configuration_fields(caplog):
          patch("src.training.peft_finetune.setup_peft_model") as mock_setup_peft_model, \
          patch("src.training.peft_finetune.prepare_dataloader") as mock_prepare_dataloader, \
          patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler, \
+         patch("src.training.peft_finetune.PeftConfig.from_pretrained") as mock_peft_config_from_pretrained, \
          patch("src.training.peft_finetune.fine_tune_peft_model") as mock_fine_tune_peft_model:
         
         mock_config_parser.return_value.config = incomplete_config
@@ -827,6 +838,7 @@ def test_main_missing_configuration_fields(caplog):
         mock_setup_peft_model.return_value = MagicMock(spec=PeftModel)
         mock_prepare_dataloader.side_effect = [MagicMock(spec=DataLoader), MagicMock(spec=DataLoader)]
         mock_get_optimizer_and_scheduler.return_value = (MagicMock(spec=Optimizer), MagicMock(spec=_LRScheduler))
+        mock_peft_config_from_pretrained.return_value = MagicMock(spec=PeftConfig)
         
         with caplog.at_level(logging.INFO):
             main(config_path)

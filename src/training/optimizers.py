@@ -31,7 +31,7 @@ def get_optimizer(
     Args:
         model (torch.nn.Module): The model being trained.
         optimizer_type (str): The type of optimizer to use ('adamw', 'adam', 'sgd', or 'rmsprop').
-        learning_rate (float): The learning rate for the optimizer.
+        lr (float): The learning rate for the optimizer.
         weight_decay (float): Weight decay (L2 penalty) for the optimizer.
         parameter_groups (List[Dict[str, Any]], optional):
             Optional list of parameter groups with specific learning rates or optimizations.

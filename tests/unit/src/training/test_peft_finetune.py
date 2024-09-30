@@ -940,14 +940,37 @@ def test_main_integration(default_config, mock_peft_model, mock_dataloader_train
 
 # 10. Edge Case Tests: Invalid Parameter Groups
 
-def test_get_optimizer_and_scheduler_invalid_parameter_groups(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler):
+def test_get_optimizer_and_scheduler_invalid_parameter_groups(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler,
+    caplog
+):
     """Test that get_optimizer_and_scheduler handles invalid parameter groups correctly."""
+    # Modify the optimizer configuration to have invalid parameter groups (missing 'params' key)
     config = default_config.copy()
     config['optimizer']['parameter_groups'] = [{"lr": 0.01}]  # Missing 'params' key
     
-    with patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler:
+    # Mock the forward pass of the model to return a mock output with 'loss'
+    mock_output = MagicMock()
+    mock_output.loss = torch.tensor(1.0, requires_grad=True)
+    mock_output.loss.backward = MagicMock()  # Mock the backward method
+    mock_peft_model.__call__.return_value = mock_output  # model(...) returns mock_output
+    
+    # Ensure that state_dict returns a serializable object to prevent PicklingError
+    mock_peft_model.state_dict.return_value = {}
+    
+    # Mock external dependencies: get_optimizer_and_scheduler and torch.save
+    with patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler, \
+         patch("torch.save") as mock_torch_save:
+        
+        # Configure the mocked get_optimizer_and_scheduler to raise KeyError
         mock_get_optimizer_and_scheduler.side_effect = KeyError("'params' key is missing in parameter_groups")
         
+        # Execute the fine_tune_peft_model function and expect a KeyError
         with pytest.raises(KeyError) as exc_info:
             fine_tune_peft_model(
                 model=mock_peft_model,
@@ -958,7 +981,12 @@ def test_get_optimizer_and_scheduler_invalid_parameter_groups(default_config, mo
                 config=config,
                 device="cpu"
             )
+        
+        # Assert that the KeyError was raised with the correct message
         assert "'params' key is missing in parameter_groups" in str(exc_info.value), "Did not raise KeyError for invalid parameter groups."
+        
+        # Optionally, assert that torch.save was not called due to the exception
+        mock_torch_save.assert_not_called()
 
 # 11. Edge Case Tests: Extremely High Weight Decay
 
@@ -1004,26 +1032,53 @@ def test_fine_tune_peft_model_zero_epochs(default_config, mock_peft_model, mock_
 
 # 13. Edge Case Tests: Negative Learning Rate
 
-def test_get_optimizer_negative_learning_rate(default_config, mock_peft_model):
-    """Test get_optimizer with a negative learning rate."""
+def test_get_optimizer_negative_learning_rate(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler,
+    caplog
+):
+    """Test get_optimizer_and_scheduler with a negative learning rate."""
+    # Modify the optimizer configuration to have a negative learning rate
     config = default_config.copy()
-    config['optimizer']['learning_rate'] = -1e-4
+    config['optimizer']['learning_rate'] = -1e-4  # Negative learning rate
     
-    with patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler:
-        mock_get_optimizer_and_scheduler.return_value = (MagicMock(spec=Optimizer), MagicMock(spec=_LRScheduler))
+    # Mock model's forward pass to return a mock output with 'loss' attribute
+    mock_output = MagicMock()
+    mock_output.loss = torch.tensor(1.0, requires_grad=True)
+    mock_output.loss.backward = MagicMock()  # Mock the backward method
+    mock_peft_model.__call__.return_value = mock_output  # model(...) returns mock_output
+    
+    # Ensure state_dict returns a serializable object to prevent PicklingError
+    mock_peft_model.state_dict.return_value = {}
+    
+    # Mock external dependencies: get_optimizer_and_scheduler and torch.save
+    with patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler, \
+         patch("torch.save") as mock_torch_save:
         
-        with pytest.raises(ValueError):
+        # Configure the mocked get_optimizer_and_scheduler to raise ValueError for invalid learning rate
+        mock_get_optimizer_and_scheduler.side_effect = ValueError("Invalid learning rate")
+        
+        # Execute fine_tune_peft_model and expect a ValueError
+        with pytest.raises(ValueError) as exc_info:
             fine_tune_peft_model(
                 model=mock_peft_model,
-                train_dataloader=MagicMock(spec=DataLoader),
-                val_dataloader=MagicMock(spec=DataLoader),
+                train_dataloader=mock_dataloader_train,
+                val_dataloader=mock_dataloader_val,
                 optimizer=mock_optimizer,
                 scheduler=mock_scheduler,
                 config=config,
                 device="cpu"
             )
-    # Depending on implementation, the negative learning rate might not raise an error immediately
-    # Additional checks can be implemented if the optimizer raises errors for negative learning rates
+        
+        # Assert that the ValueError was raised with the correct message
+        assert "Invalid learning rate" in str(exc_info.value), "Did not raise ValueError for negative learning rate."
+        
+        # Assert that torch.save was not called due to the exception
+        mock_torch_save.assert_not_called()
 
 # 14. Edge Case Tests: Missing Configuration Fields
 

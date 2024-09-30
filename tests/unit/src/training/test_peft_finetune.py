@@ -33,10 +33,9 @@ def mock_model():
     return MagicMock(spec=DetrForObjectDetection)
 
 @pytest.fixture
-def mock_peft_model(mock_model):
+def mock_peft_model():
     """Fixture to create a mock PeftModel."""
     peft_model = MagicMock(spec=PeftModel)
-    peft_model.return_value = peft_model
     return peft_model
 
 @pytest.fixture
@@ -296,14 +295,16 @@ def test_fine_tune_peft_model_training_loop(
     mock_peft_model.train = MagicMock()
     mock_peft_model.eval = MagicMock()
     
-    # Mock model's forward pass
+    # Mock model's forward pass to return a mock output with a 'loss' attribute
     mock_output = MagicMock()
     mock_output.loss = torch.tensor(1.0, requires_grad=True)
-    mock_peft_model.return_value = mock_output
+    mock_output.loss.backward = MagicMock()  # Ensure backward() can be called
+    mock_peft_model.__call__.return_value = mock_output  # model(...) returns mock_output
     
     # Ensure state_dict returns a serializable object to prevent PicklingError
     mock_peft_model.state_dict.return_value = {}
     
+    # Mock external dependencies: autocast, GradScaler, and torch.save
     with patch("src.training.peft_finetune.autocast") as mock_autocast, \
          patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
          patch("torch.save") as mock_torch_save:
@@ -315,6 +316,7 @@ def test_fine_tune_peft_model_training_loop(
         mock_grad_scaler_instance = MagicMock()
         mock_grad_scaler.return_value = mock_grad_scaler_instance
         
+        # Execute the fine_tune_peft_model function within the mocked context
         with caplog.at_level(logging.INFO):
             fine_tune_peft_model(
                 model=mock_peft_model,
@@ -328,7 +330,6 @@ def test_fine_tune_peft_model_training_loop(
         
         # Assertions to verify that training methods were called
         mock_peft_model.train.assert_called()
-        mock_peft_model.eval.assert_called()
         
         # Assertions to verify optimizer and scheduler methods were called
         mock_optimizer.zero_grad.assert_called()
@@ -338,7 +339,10 @@ def test_fine_tune_peft_model_training_loop(
         # Assertions to verify loss.backward() was called
         mock_output.loss.backward.assert_called()
         
-        # Assertions to verify torch.save was called with the correct arguments
+        # Assertions to verify model.eval() was called during validation
+        mock_peft_model.eval.assert_called()
+        
+        # Assertions to verify torch.save was called with the mock state dict and the correct path
         mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
         
         # Assertion to verify that checkpoint saving was logged

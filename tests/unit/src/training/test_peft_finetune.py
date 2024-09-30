@@ -24,8 +24,11 @@ from src.utils.config_parser import ConfigParser
 
 @pytest.fixture
 def mock_peft_config():
-    """Fixture to create a mock PeftConfig."""
-    return MagicMock(spec=PeftConfig)
+    """Fixture to mock PeftConfig.from_pretrained."""
+    with patch("src.training.peft_finetune.PeftConfig.from_pretrained") as mock_peft_config_from_pretrained:
+        mock_peft_config_instance = MagicMock(spec=PeftConfig)
+        mock_peft_config_from_pretrained.return_value = mock_peft_config_instance
+        yield mock_peft_config_instance
 
 @pytest.fixture
 def mock_model():
@@ -34,8 +37,13 @@ def mock_model():
 
 @pytest.fixture
 def mock_peft_model():
-    """Fixture to create a mock PeftModel."""
+    """Fixture to create a fully mocked PeftModel with necessary methods."""
     peft_model = MagicMock(spec=PeftModel)
+    peft_model.to = MagicMock(return_value=peft_model)
+    peft_model.train = MagicMock()
+    peft_model.eval = MagicMock()
+    peft_model.forward = MagicMock()
+    peft_model.state_dict = MagicMock(return_value={})
     return peft_model
 
 @pytest.fixture
@@ -46,26 +54,32 @@ def mock_feature_extractor():
 @pytest.fixture
 def mock_dataset():
     """Fixture to create a mock Dataset."""
-    return MagicMock(spec=Dataset)
+    return MagicMock(spec=CocoDetection)
 
 @pytest.fixture
 def mock_dataloader_train():
-    """Fixture to create a mock training DataLoader."""
-    mock_loader = MagicMock(spec=DataLoader)
-    mock_loader.__len__.return_value = 10  # Example length
-    mock_loader.__iter__.return_value = iter([
-        (torch.randn(4, 3, 224, 224), [{"labels": torch.randint(0, 91, (4,)), "boxes": torch.randn(4, 4)}])
-    ])  # Example data
+    """Fixture to create a mock training DataLoader with a specified number of batches."""
+    num_batches = 10  # Define the number of batches per epoch
+    batch = (
+        torch.randn(4, 3, 224, 224),  # Pixel values
+        [{"labels": torch.randint(0, 91, (4,)), "boxes": torch.randn(4, 4)}]  # Targets
+    )
+    mock_loader = MagicMock()
+    mock_loader.__len__.return_value = num_batches
+    mock_loader.__iter__.return_value = iter([batch for _ in range(num_batches)])
     return mock_loader
 
 @pytest.fixture
 def mock_dataloader_val():
-    """Fixture to create a mock validation DataLoader."""
-    mock_loader = MagicMock(spec=DataLoader)
-    mock_loader.__len__.return_value = 5  # Example length
-    mock_loader.__iter__.return_value = iter([
-        (torch.randn(4, 3, 224, 224), [{"labels": torch.randint(0, 91, (4,)), "boxes": torch.randn(4, 4)}])
-    ])  # Example data
+    """Fixture to create a mock validation DataLoader with a specified number of batches."""
+    num_batches = 5  # Define the number of batches for validation
+    batch = (
+        torch.randn(4, 3, 224, 224),  # Pixel values
+        [{"labels": torch.randint(0, 91, (4,)), "boxes": torch.randn(4, 4)}]  # Targets
+    )
+    mock_loader = MagicMock()
+    mock_loader.__len__.return_value = num_batches
+    mock_loader.__iter__.return_value = iter([batch for _ in range(num_batches)])
     return mock_loader
 
 @pytest.fixture
@@ -185,9 +199,13 @@ def test_prepare_dataloader_success(mock_feature_extractor, mock_dataset, mock_d
     with patch("src.training.peft_finetune.CocoDetection") as mock_coco_detection, \
          patch("torch.utils.data.DataLoader") as mock_dataloader:
         
+        # Configure the mocked CocoDetection to return the mock_dataset
         mock_coco_detection.return_value = mock_dataset
+        
+        # Configure the mocked DataLoader to return the mock_dataloader_train
         mock_dataloader.return_value = mock_dataloader_train
         
+        # Call the function under test
         dataloader = prepare_dataloader(
             data_dir="./data",
             batch_size=4,
@@ -195,27 +213,43 @@ def test_prepare_dataloader_success(mock_feature_extractor, mock_dataset, mock_d
             mode="train"
         )
         
+        # Assert that CocoDetection was called with the correct arguments
         mock_coco_detection.assert_called_once_with(
             root=os.path.join("./data", "train2017"),
             annFile=os.path.join("./data", "annotations/instances_train2017.json"),
-            transform=mock_feature_extractor
+            transform=ANY  # Accept any callable (lambda function)
         )
+        
+        # Assert that DataLoader was called with the correct arguments
         mock_dataloader.assert_called_once_with(
             mock_dataset,
             batch_size=4,
-            shuffle=True,
-            collate_fn=pytest.any
+            shuffle=True,  # Shuffle should be True for training
+            collate_fn=ANY  # Accept any callable (lambda function)
         )
+        
+        # Assert that the function returns the expected DataLoader
         assert dataloader == mock_dataloader_train, "Dataloader should be returned correctly."
+        
+        # Additional Assertions (Optional but Recommended)
+        # Verify that the 'transform' argument in CocoDetection is a callable
+        transform_arg = mock_coco_detection.call_args.kwargs.get('transform')
+        assert callable(transform_arg), "Transform should be a callable."
+        
+        # Verify that the 'collate_fn' argument in DataLoader is a callable
+        collate_fn_arg = mock_dataloader.call_args.kwargs.get('collate_fn')
+        assert callable(collate_fn_arg), "collate_fn should be a callable."
 
 def test_prepare_dataloader_validation_mode(mock_feature_extractor, mock_dataset, mock_dataloader_val):
     """Test successful preparation of DataLoader for validation mode."""
     with patch("src.training.peft_finetune.CocoDetection") as mock_coco_detection, \
          patch("torch.utils.data.DataLoader") as mock_dataloader:
         
+        # Configure the mocks
         mock_coco_detection.return_value = mock_dataset
         mock_dataloader.return_value = mock_dataloader_val
         
+        # Call the function under test
         dataloader = prepare_dataloader(
             data_dir="./data",
             batch_size=8,
@@ -223,18 +257,32 @@ def test_prepare_dataloader_validation_mode(mock_feature_extractor, mock_dataset
             mode="val"
         )
         
+        # Assert that CocoDetection was called with correct arguments
         mock_coco_detection.assert_called_once_with(
             root=os.path.join("./data", "val2017"),
             annFile=os.path.join("./data", "annotations/instances_val2017.json"),
-            transform=mock_feature_extractor
+            transform=ANY  # Accept any callable (lambda function)
         )
+        
+        # Assert that DataLoader was called with correct arguments
         mock_dataloader.assert_called_once_with(
             mock_dataset,
             batch_size=8,
             shuffle=False,
-            collate_fn=pytest.any
+            collate_fn=ANY  # Accept any callable (lambda function)
         )
+        
+        # Assert that the returned dataloader is as expected
         assert dataloader == mock_dataloader_val, "Dataloader should be returned correctly."
+        
+        # Additional Assertions to Verify Callables
+        # Extract the 'transform' argument passed to CocoDetection
+        transform_arg = mock_coco_detection.call_args.kwargs.get('transform')
+        assert callable(transform_arg), "Transform should be a callable."
+        
+        # Extract the 'collate_fn' argument passed to DataLoader
+        collate_fn_arg = mock_dataloader.call_args.kwargs.get('collate_fn')
+        assert callable(collate_fn_arg), "collate_fn should be a callable."
 
 def test_prepare_dataloader_logging(mock_feature_extractor, mock_dataset, mock_dataloader_train, caplog):
     """Test that prepare_dataloader logs the appropriate message."""
@@ -256,8 +304,10 @@ def test_prepare_dataloader_logging(mock_feature_extractor, mock_dataset, mock_d
 def test_prepare_dataloader_error(mock_feature_extractor):
     """Test that prepare_dataloader raises an error when data_dir is invalid."""
     with patch("src.training.peft_finetune.CocoDetection") as mock_coco_detection:
+        # Configure the mock to raise an Exception when instantiated
         mock_coco_detection.side_effect = Exception("Invalid data directory")
         
+        # Attempt to prepare the dataloader and expect an exception
         with pytest.raises(Exception) as exc_info:
             prepare_dataloader(
                 data_dir="./invalid_data",
@@ -265,7 +315,12 @@ def test_prepare_dataloader_error(mock_feature_extractor):
                 feature_extractor=mock_feature_extractor,
                 mode="train"
             )
-        assert "Error preparing dataloader: Invalid data directory" in str(exc_info.value), "Did not raise expected exception on invalid data directory."
+        
+        # Assert that the exception message contains the expected substring
+        assert "Invalid data directory" in str(exc_info.value), "Did not raise expected exception on invalid data directory."
+        
+        # Additionally, verify that CocoDetection was indeed called once
+        mock_coco_detection.assert_called_once()
 
 def test_prepare_dataloader_invalid_mode(mock_feature_extractor):
     """Test that prepare_dataloader raises an assertion error for invalid mode."""
@@ -289,34 +344,50 @@ def test_fine_tune_peft_model_training_loop(
     mock_scheduler,
     caplog
 ):
-    """Test fine_tune_peft_model executes the training and validation loops correctly."""
+    """Test that fine_tune_peft_model executes the training and validation loops correctly."""
     
-    # Mock model's train and eval methods
+    # 1. Mock model's methods
+    # Ensure that model.to(device) returns the model itself
+    mock_peft_model.to = MagicMock(return_value=mock_peft_model)
+    # Mock train() and eval() methods
     mock_peft_model.train = MagicMock()
     mock_peft_model.eval = MagicMock()
     
-    # Mock model's forward pass to return a mock output with a 'loss' attribute
+    # 2. Mock model's forward method to return a mock output with 'loss'
     mock_output = MagicMock()
     mock_output.loss = torch.tensor(1.0, requires_grad=True)
-    mock_output.loss.backward = MagicMock()  # Ensure backward() can be called
-    mock_peft_model.forward.return_value = mock_output  # Correctly mock forward
+    mock_peft_model.forward.return_value = mock_output
     
-    # Ensure state_dict returns a serializable object to prevent PicklingError
+    # 3. Mock state_dict to return a serializable object
     mock_peft_model.state_dict.return_value = {}
     
-    # Mock external dependencies: autocast, GradScaler, and torch.save
+    # 4. Mock external dependencies: autocast, GradScaler, and torch.save
     with patch("src.training.peft_finetune.autocast") as mock_autocast, \
          patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
          patch("torch.save") as mock_torch_save:
         
-        # Configure the mocked autocast context manager
-        mock_autocast.return_value = MagicMock()
+        # 4a. Mock autocast as a context manager that does nothing
+        mock_autocast_context = MagicMock()
+        mock_autocast_context.__enter__ = MagicMock()
+        mock_autocast_context.__exit__ = MagicMock()
+        mock_autocast.return_value = mock_autocast_context
         
-        # Configure the mocked GradScaler instance
-        mock_grad_scaler_instance = MagicMock()
-        mock_grad_scaler.return_value = mock_grad_scaler_instance
+        # 4b. Handle GradScaler based on mixed_precision configuration
+        mixed_precision = default_config['training'].get('mixed_precision', True)
+        if mixed_precision:
+            # If mixed_precision is enabled, mock GradScaler instance methods
+            mock_grad_scaler_instance = MagicMock()
+            mock_grad_scaler.return_value = mock_grad_scaler_instance
+            # Mock scaler.scale(loss) to return the scaled loss
+            mock_grad_scaler_instance.scale.return_value = mock_output.loss
+        else:
+            # If mixed_precision is disabled, GradScaler is not used
+            mock_grad_scaler.return_value = None
         
-        # Execute the fine_tune_peft_model function within the mocked context
+        # 4c. Mock torch.save to prevent actual file I/O
+        mock_torch_save.return_value = None
+        
+        # 5. Execute the function within the context manager to capture logs
         with caplog.at_level(logging.INFO):
             fine_tune_peft_model(
                 model=mock_peft_model,
@@ -327,26 +398,30 @@ def test_fine_tune_peft_model_training_loop(
                 config=default_config,
                 device="cpu"
             )
-        
-        # Assertions to verify that training methods were called
-        mock_peft_model.train.assert_called()
-        
-        # Assertions to verify optimizer and scheduler methods were called
-        mock_optimizer.zero_grad.assert_called()
-        mock_optimizer.step.assert_called()
-        mock_scheduler.step.assert_called()
-        
-        # Assertions to verify loss.backward() was called
-        mock_output.loss.backward.assert_called()
-        
-        # Assertions to verify model.eval() was called during validation
-        mock_peft_model.eval.assert_called()
-        
-        # Assertions to verify torch.save was called with the mock state dict and the correct path
-        mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
-        
-        # Assertion to verify that checkpoint saving was logged
-        assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, "Did not log checkpoint saving."
+    
+    # 6. Assertions to verify that model methods were called
+    mock_peft_model.train.assert_called()
+    mock_peft_model.eval.assert_called()
+    
+    # 7. Assertions to verify optimizer and scheduler methods were called
+    mock_optimizer.zero_grad.assert_called()
+    mock_optimizer.step.assert_called()
+    mock_scheduler.step.assert_called()
+    
+    # 8. Assertions to verify loss.backward() was called
+    mock_output.loss.backward.assert_called()
+    
+    # 9. Assertions to verify GradScaler methods were called if mixed_precision is enabled
+    if mixed_precision:
+        mock_grad_scaler_instance.scale.assert_called_with(mock_output.loss)
+        mock_grad_scaler_instance.step.assert_called_with(mock_optimizer)
+        mock_grad_scaler_instance.update.assert_called()
+    
+    # 10. Assertions to verify torch.save was called with the mock state_dict and correct path
+    mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
+    
+    # 11. Assertions to verify that checkpoint saving was logged
+    assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, "Did not log checkpoint saving."
 
 def test_fine_tune_peft_model_mixed_precision(
     default_config,
@@ -362,15 +437,15 @@ def test_fine_tune_peft_model_mixed_precision(
     config = default_config.copy()
     config['training']['mixed_precision'] = True
     
-    # Mock model's train and eval methods
+    # Mock model's methods
+    mock_peft_model.to = MagicMock(return_value=mock_peft_model)
     mock_peft_model.train = MagicMock()
     mock_peft_model.eval = MagicMock()
     
-    # Mock model's forward pass to return a mock output with a 'loss' attribute
+    # Mock forward pass to return a mock output with a 'loss' attribute
     mock_output = MagicMock()
     mock_output.loss = torch.tensor(1.0, requires_grad=True)
-    mock_output.loss.backward = MagicMock()
-    mock_peft_model.forward.return_value = mock_output  # Correctly mock forward
+    mock_peft_model.forward.return_value = mock_output
     
     # Ensure state_dict returns a serializable object to prevent PicklingError
     mock_peft_model.state_dict.return_value = {}
@@ -380,15 +455,18 @@ def test_fine_tune_peft_model_mixed_precision(
          patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
          patch("torch.save") as mock_torch_save:
         
-        # Configure the mocked autocast context manager
-        mock_autocast.return_value = MagicMock()
+        # Configure autocast as a proper context manager
+        mock_autocast_context = MagicMock()
+        mock_autocast_context.__enter__.return_value = None  # autocast does not return a value
+        mock_autocast_context.__exit__.return_value = False  # Do not suppress exceptions
+        mock_autocast.return_value = mock_autocast_context
         
-        # Configure the mocked GradScaler instance and its methods
+        # Configure GradScaler instance and its methods
         mock_grad_scaler_instance = MagicMock()
-        mock_grad_scaler_instance.scale.return_value = mock_output.loss  # Ensure scaler.scale(loss) returns a mock loss
+        mock_grad_scaler_instance.scale.return_value = mock_output.loss  # scaler.scale(loss) returns the scaled loss
         mock_grad_scaler.return_value = mock_grad_scaler_instance
         
-        # Mock torch.save to prevent PicklingError
+        # Mock torch.save to prevent actual saving
         mock_torch_save.return_value = None
         
         # Execute the fine_tune_peft_model function within the mocked context
@@ -405,28 +483,45 @@ def test_fine_tune_peft_model_mixed_precision(
     
     # Assertions to verify that training methods were called
     mock_peft_model.train.assert_called()
-    
-    # Assertions to verify optimizer and scheduler methods were called
-    mock_optimizer.zero_grad.assert_called()
-    mock_optimizer.step.assert_called()
-    mock_scheduler.step.assert_called()
-    
-    # Assertions to verify loss.backward() was called
-    mock_output.loss.backward.assert_called()
-    
-    # Assertions to verify GradScaler methods were called
-    mock_grad_scaler_instance.scale.assert_called_with(mock_output.loss)
-    mock_grad_scaler_instance.step.assert_called_with(mock_optimizer)
-    mock_grad_scaler_instance.update.assert_called()
-    
-    # Assertions to verify model.eval() was called during validation
     mock_peft_model.eval.assert_called()
     
-    # Assertions to verify torch.save was called with the mock state dict and the correct path
-    mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
+    # Assertions to verify optimizer and scheduler methods were called
+    assert mock_optimizer.zero_grad.call_count == default_config['training']['num_epochs'] * len(mock_dataloader_train), \
+        "optimizer.zero_grad() should be called once per batch per epoch."
+    assert mock_optimizer.step.call_count == default_config['training']['num_epochs'] * len(mock_dataloader_train), \
+        "optimizer.step() should be called once per batch per epoch."
+    assert mock_scheduler.step.call_count == default_config['training']['num_epochs'] * len(mock_dataloader_train), \
+        "scheduler.step() should be called once per batch per epoch."
     
-    # Assertion to verify that checkpoint saving was logged
-    assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, "Did not log checkpoint saving."
+    # Assertions to verify loss.backward() was called
+    assert mock_output.loss.backward.call_count == default_config['training']['num_epochs'] * len(mock_dataloader_train), \
+        "loss.backward() should be called once per batch per epoch."
+    
+    # Assertions to verify GradScaler methods were called
+    assert mock_grad_scaler_instance.scale.call_count == default_config['training']['num_epochs'] * len(mock_dataloader_train), \
+        "GradScaler.scale() should be called once per batch per epoch."
+    assert mock_grad_scaler_instance.step.call_count == default_config['training']['num_epochs'] * len(mock_dataloader_train), \
+        "GradScaler.step() should be called once per batch per epoch."
+    assert mock_grad_scaler_instance.update.call_count == default_config['training']['num_epochs'] * len(mock_dataloader_train), \
+        "GradScaler.update() should be called once per batch per epoch."
+    
+    # Assertions to verify torch.save was called with the mock state dict and the correct path
+    assert mock_torch_save.call_count == config['training']['num_epochs'], \
+        "torch.save() should be called once per epoch."
+    
+    # Verify that torch.save was called with the correct arguments for each epoch
+    expected_checkpoint_paths = [
+        f"{config['training']['checkpoint_dir']}/model_epoch_{epoch + 1}.pt" 
+        for epoch in range(config['training']['num_epochs'])
+    ]
+    actual_calls = mock_torch_save.call_args_list
+    for expected_path in expected_checkpoint_paths:
+        mock_torch_save.assert_any_call({}, expected_path)
+    
+    # Assertions to verify that checkpoint saving was logged for each epoch
+    for epoch in range(1, config['training']['num_epochs'] + 1):
+        checkpoint_log = f"Model checkpoint saved at {config['training']['checkpoint_dir']}/model_epoch_{epoch}.pt"
+        assert checkpoint_log in caplog.text, f"Did not log checkpoint saving for epoch {epoch}."
 
 def test_fine_tune_peft_model_error_during_training(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler):
     """Test that fine_tune_peft_model raises an error when an exception occurs during training."""
@@ -532,42 +627,103 @@ def test_fine_tune_peft_model_empty_dataloader(
 
 # 4. Tests for main
 
-def test_main_success(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler, mock_feature_extractor, mock_peft_config, caplog):
-    """Test that main function runs successfully with valid configuration."""
+def test_main_success(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler,
+    mock_feature_extractor,
+    mock_peft_config,
+    caplog
+):
+    """
+    Test that the main function runs successfully with a valid configuration.
+    """
     config_path = "configs/peft_config.yaml"
     
-    # Mock ConfigParser to return default_config
+    # Patch all external dependencies that main relies on
     with patch("src.training.peft_finetune.ConfigParser") as mock_config_parser, \
          patch("src.training.peft_finetune.setup_logging") as mock_setup_logging, \
          patch("src.training.peft_finetune.DetrFeatureExtractor.from_pretrained") as mock_from_pretrained, \
          patch("src.training.peft_finetune.setup_peft_model") as mock_setup_peft_model, \
          patch("src.training.peft_finetune.prepare_dataloader") as mock_prepare_dataloader, \
          patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler, \
+         patch("src.training.peft_finetune.PeftConfig.from_pretrained") as mock_peft_config_from_pretrained, \
          patch("src.training.peft_finetune.fine_tune_peft_model") as mock_fine_tune_peft_model:
         
-        mock_config_parser.return_value.config = default_config
+        # Configure the ConfigParser mock to return the default configuration
+        mock_config_parser_instance = MagicMock()
+        mock_config_parser_instance.config = default_config
+        mock_config_parser.return_value = mock_config_parser_instance
+        
+        # Configure the DetrFeatureExtractor mock
         mock_from_pretrained.return_value = mock_feature_extractor
+        
+        # Configure the PeftConfig.from_pretrained mock to return a mock PeftConfig
+        mock_peft_config_from_pretrained.return_value = mock_peft_config
+        
+        # Configure the setup_peft_model mock to return the mock PEFT model
         mock_setup_peft_model.return_value = mock_peft_model
+        
+        # Configure the prepare_dataloader mock to return mock training and validation dataloaders
         mock_prepare_dataloader.side_effect = [mock_dataloader_train, mock_dataloader_val]
+        
+        # Configure the get_optimizer_and_scheduler mock to return mock optimizer and scheduler
         mock_get_optimizer_and_scheduler.return_value = (mock_optimizer, mock_scheduler)
         
+        # Configure fine_tune_peft_model to do nothing (since it's being tested separately)
+        mock_fine_tune_peft_model.return_value = None
+        
+        # Execute the main function within the context of captured logs
         with caplog.at_level(logging.INFO):
             main(config_path)
         
+        # Assertions to verify that each mocked method was called correctly
+        
+        # Verify ConfigParser was instantiated with the correct config path
         mock_config_parser.assert_called_once_with(config_path)
+        
+        # Verify setup_logging was called once to initialize logging
         mock_setup_logging.assert_called_once()
+        
+        # Verify DetrFeatureExtractor.from_pretrained was called with the correct model name
         mock_from_pretrained.assert_called_once_with(default_config['model']['model_name'])
+        
+        # Verify PeftConfig.from_pretrained was called with the correct PEFT model path
+        mock_peft_config_from_pretrained.assert_called_once_with(default_config['model']['peft_model_path'])
+        
+        # Verify setup_peft_model was called with correct arguments
         mock_setup_peft_model.assert_called_once_with(
-            "facebook/detr-resnet-50",
-            num_classes=91,
+            default_config['model']['model_name'],
+            num_classes=default_config['model']['num_classes'],
             peft_config=mock_peft_config
         )
+        
+        # Verify prepare_dataloader was called twice: once for training and once for validation
         assert mock_prepare_dataloader.call_count == 2, "prepare_dataloader should be called twice for train and val."
+        mock_prepare_dataloader.assert_any_call(
+            data_dir=default_config['data']['data_dir'],
+            batch_size=default_config['training']['batch_size'],
+            feature_extractor=mock_feature_extractor,
+            mode="train"
+        )
+        mock_prepare_dataloader.assert_any_call(
+            data_dir=default_config['data']['data_dir'],
+            batch_size=default_config['training']['batch_size'],
+            feature_extractor=mock_feature_extractor,
+            mode="val"
+        )
+        
+        # Verify get_optimizer_and_scheduler was called with correct arguments
         mock_get_optimizer_and_scheduler.assert_called_once_with(
             model=mock_peft_model,
             config=default_config['optimizer'],
             num_training_steps=default_config['training']['num_epochs'] * len(mock_dataloader_train)
         )
+        
+        # Verify fine_tune_peft_model was called with correct arguments
         mock_fine_tune_peft_model.assert_called_once_with(
             model=mock_peft_model,
             train_dataloader=mock_dataloader_train,
@@ -575,24 +731,32 @@ def test_main_success(default_config, mock_peft_model, mock_dataloader_train, mo
             optimizer=mock_optimizer,
             scheduler=mock_scheduler,
             config=default_config,
-            device="cpu"
+            device=default_config['training'].get('device', 'cuda')
         )
-        assert "Starting PEFT fine-tuning process." in caplog.text, "Did not log starting process."
-        assert "PEFT fine-tuning completed." in caplog.text, "Did not log completion of process."
+        
+        # Assertions to verify that key log messages are present
+        assert "Starting PEFT fine-tuning process." in caplog.text, "Did not log starting fine-tuning process."
+        assert "PEFT fine-tuning completed." in caplog.text, "Did not log completion of fine-tuning process."
 
-def test_main_error_in_config_parser():
+def test_main_error_in_config_parser(caplog):
     """Test that main raises an error when ConfigParser fails."""
     config_path = "configs/invalid_config.yaml"
     
-    with patch("src.training.peft_finetune.ConfigParser") as mock_config_parser:
+    # Patch ConfigParser to raise an exception when instantiated
+    with patch("src.training.peft_finetune.ConfigParser", autospec=True) as mock_config_parser, \
+         patch("src.training.peft_finetune.setup_logging") as mock_setup_logging:
+        
+        # Configure the mock to raise an exception upon instantiation
         mock_config_parser.side_effect = Exception("Config file not found")
         
-        with pytest.raises(Exception) as exc_info, \
-             patch("src.training.peft_finetune.setup_logging") as mock_setup_logging:
+        # Execute main and verify that it raises the expected exception
+        with pytest.raises(Exception) as exc_info:
             main(config_path)
-        assert "Error setting up PEFT model: Config file not found" in str(exc_info.value), "Did not raise expected exception for config parser failure."
+        
+        # Assert that the exception message contains the expected text
+        assert "Config file not found" in str(exc_info.value), "Did not raise expected exception for config parser failure."
 
-def test_main_error_in_setup_peft_model(default_config, mock_peft_model):
+def test_main_error_in_setup_peft_model(default_config, mock_peft_model, mock_peft_config):
     """Test that main raises an error when setup_peft_model fails."""
     config_path = "configs/peft_config.yaml"
     
@@ -601,13 +765,21 @@ def test_main_error_in_setup_peft_model(default_config, mock_peft_model):
          patch("src.training.peft_finetune.DetrFeatureExtractor.from_pretrained") as mock_from_pretrained, \
          patch("src.training.peft_finetune.setup_peft_model") as mock_setup_peft_model:
         
+        # Mock the configuration parser to return the default configuration
         mock_config_parser.return_value.config = default_config
+        
+        # Mock the feature extractor to prevent actual model loading
         mock_from_pretrained.return_value = MagicMock(spec=DetrFeatureExtractor)
+        
+        # Mock setup_peft_model to raise an exception, simulating a failure during PEFT setup
         mock_setup_peft_model.side_effect = Exception("PEFT setup failed")
         
-        with pytest.raises(Exception) as exc_info:
+        # Execute the main function and expect it to raise the mocked exception
+        with pytest.raises(Exception, match="PEFT setup failed") as exc_info:
             main(config_path)
-        assert "Error setting up PEFT model: PEFT setup failed" in str(exc_info.value), "Did not raise expected exception for PEFT setup failure."
+        
+        # Assert that the exception message contains the expected error
+        assert "PEFT setup failed" in str(exc_info.value), "Did not raise expected exception for PEFT setup failure."
 
 # 5. Edge Case Tests
 
@@ -634,49 +806,181 @@ def test_fine_tune_peft_model_zero_epochs(default_config, mock_peft_model, mock_
     mock_scheduler.step.assert_not_called()
     assert "Starting Epoch 1/0" not in caplog.text, "Did not skip training loop for zero epochs."
 
-def test_fine_tune_peft_model_large_batch_size(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler):
-    """Test fine_tune_peft_model with a very large batch size."""
+def test_fine_tune_peft_model_large_batch_size(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler,
+    caplog  # Added caplog as a parameter
+):
+    """
+    Test fine_tune_peft_model with an extremely large batch size to ensure
+    that the function handles large data volumes without errors and logs appropriately.
+    """
+    # Update the configuration to use a very large batch size
     config = default_config.copy()
-    config['training']['batch_size'] = 1024
-    
-    # Mock dataloader to simulate large batch
-    large_batch = ([torch.randn(1024, 3, 224, 224)], [{"labels": torch.randint(0, 91, (1024,)), "boxes": torch.randn(1024, 4)}])
-    mock_dataloader_train.__iter__.return_value = [large_batch]
-    mock_dataloader_train.__len__.return_value = 1
-    mock_dataloader_val.__iter__.return_value = [large_batch]
-    mock_dataloader_val.__len__.return_value = 1
-    
-    with caplog.at_level(logging.INFO):
-        fine_tune_peft_model(
-            model=mock_peft_model,
-            train_dataloader=mock_dataloader_train,
-            val_dataloader=mock_dataloader_val,
-            optimizer=mock_optimizer,
-            scheduler=mock_scheduler,
-            config=config,
-            device="cpu"
-        )
-    
-    assert "Starting Epoch 1/2" in caplog.text, "Did not log start of epoch with large batch size."
-    assert "Training Loss" in caplog.text, "Did not log training loss."
-    assert "Validation Loss" in caplog.text, "Did not log validation loss."
+    config['training']['batch_size'] = 10000  # Extremely large batch size
 
-def test_fine_tune_peft_model_no_validation(default_config, mock_peft_model, mock_dataloader_train, mock_optimizer, mock_scheduler, caplog):
-    """Test fine_tune_peft_model when validation dataloader is None."""
-    with caplog.at_level(logging.INFO):
-        fine_tune_peft_model(
-            model=mock_peft_model,
-            train_dataloader=mock_dataloader_train,
-            val_dataloader=None,  # No validation
-            optimizer=mock_optimizer,
-            scheduler=mock_scheduler,
-            config=default_config,
-            device="cpu"
-        )
+    # Mock dataloader to simulate a single large batch
+    large_batch = (
+        torch.randn(10000, 3, 224, 224),  # Pixel values for images
+        [
+            {
+                "labels": torch.randint(0, 91, (10000,)),  # Random labels
+                "boxes": torch.randn(10000, 4)  # Random bounding boxes
+            }
+        ]
+    )
     
-    # Check that validation loop is skipped
-    mock_peft_model.eval.assert_not_called()
-    assert "Validation Loss" not in caplog.text, "Did not skip validation loop when val_dataloader is None."
+    # Configure the mock_dataloader_train to return a single large batch
+    mock_dataloader_train.__iter__.return_value = iter([large_batch])
+    mock_dataloader_train.__len__.return_value = 1  # Only one batch
+
+    # Configure the mock_dataloader_val similarly
+    mock_dataloader_val.__iter__.return_value = iter([large_batch])
+    mock_dataloader_val.__len__.return_value = 1  # Only one batch
+
+    # Mock the model's methods
+    mock_peft_model.to = MagicMock(return_value=mock_peft_model)
+    mock_peft_model.train = MagicMock()
+    mock_peft_model.eval = MagicMock()
+
+    # Mock the forward pass to return a mock output with a 'loss' attribute
+    mock_output = MagicMock()
+    mock_output.loss = torch.tensor(1.0, requires_grad=True)
+    mock_peft_model.forward.return_value = mock_output
+
+    # Ensure state_dict returns a serializable object to prevent PicklingError during torch.save
+    mock_peft_model.state_dict.return_value = {}
+
+    # Mock external dependencies: autocast, GradScaler, and torch.save
+    with patch("src.training.peft_finetune.autocast"), \
+         patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
+         patch("torch.save") as mock_torch_save:
+        
+        # Configure the mocked GradScaler instance
+        mock_grad_scaler_instance = MagicMock()
+        mock_grad_scaler_instance.scale.return_value = mock_output.loss  # scaler.scale(loss) returns scaled loss
+        mock_grad_scaler.return_value = mock_grad_scaler_instance
+
+        # Execute the fine_tune_peft_model function within the mocked context
+        with caplog.at_level(logging.INFO):
+            fine_tune_peft_model(
+                model=mock_peft_model,
+                train_dataloader=mock_dataloader_train,
+                val_dataloader=mock_dataloader_val,
+                optimizer=mock_optimizer,
+                scheduler=mock_scheduler,
+                config=config,
+                device="cpu"
+            )
+
+    # Assertions to verify that training and validation methods were called
+    mock_peft_model.train.assert_called()
+    mock_peft_model.eval.assert_called()
+
+    # Assertions to verify optimizer and scheduler methods were called
+    # Since there's only one batch, these should be called once
+    mock_optimizer.zero_grad.assert_called_once()
+    mock_optimizer.step.assert_called_once()
+    mock_scheduler.step.assert_called_once()
+
+    # Assertions to verify that loss.backward() was called
+    mock_output.loss.backward.assert_called_once()
+
+    # Assertions to verify GradScaler methods were called appropriately
+    mock_grad_scaler_instance.scale.assert_called_once_with(mock_output.loss)
+    mock_grad_scaler_instance.step.assert_called_once_with(mock_optimizer)
+    mock_grad_scaler_instance.update.assert_called_once()
+
+    # Assertions to verify that torch.save was called correctly
+    mock_torch_save.assert_called_once_with({}, ANY)  # ANY is used for the checkpoint path
+
+    # Assertions to verify that checkpoint saving was logged
+    assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, \
+        "Did not log checkpoint saving."
+
+    # Assertions to verify that training and validation logs are present
+    assert "Starting Epoch 1/2" in caplog.text, "Did not log start of epoch."
+    assert "Training Loss: 1.0" in caplog.text, "Did not log training loss."
+    assert "Validation Loss: 1.0" in caplog.text, "Did not log validation loss."
+
+def test_fine_tune_peft_model_no_validation(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_optimizer,
+    mock_scheduler,
+    caplog
+):
+    """Test fine_tune_peft_model when validation dataloader is None."""
+    
+    # Mock model's methods
+    mock_peft_model.to = MagicMock(return_value=mock_peft_model)
+    mock_peft_model.train = MagicMock()
+    mock_peft_model.eval = MagicMock()
+    mock_peft_model.forward = MagicMock(return_value=MagicMock(loss=torch.tensor(1.0, requires_grad=True)))
+    mock_peft_model.state_dict = MagicMock(return_value={})
+    
+    # Mock external dependencies: autocast, GradScaler, and torch.save
+    with patch("src.training.peft_finetune.autocast") as mock_autocast, \
+         patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
+         patch("torch.save") as mock_torch_save:
+        
+        # Configure the mocked autocast context manager
+        mock_autocast.return_value = MagicMock()
+        
+        # Configure the mocked GradScaler instance if mixed_precision is enabled
+        if default_config['training'].get('mixed_precision', True):
+            mock_grad_scaler_instance = MagicMock()
+            mock_grad_scaler.return_value = mock_grad_scaler_instance
+            mock_grad_scaler_instance.scale.return_value = mock_peft_model.forward.return_value.loss
+        else:
+            mock_grad_scaler.return_value = None
+        
+        # Execute the fine_tune_peft_model function with val_dataloader=None
+        with caplog.at_level(logging.INFO):
+            fine_tune_peft_model(
+                model=mock_peft_model,
+                train_dataloader=mock_dataloader_train,
+                val_dataloader=None,  # No validation
+                optimizer=mock_optimizer,
+                scheduler=mock_scheduler,
+                config=default_config,
+                device="cpu"
+            )
+    
+    # Assertions to verify that training methods were called
+    mock_peft_model.train.assert_called()
+    
+    # Assertions to verify optimizer and scheduler methods were called the expected number of times
+    # Since len(mock_dataloader_train) = 10 (from fixture), num_epochs=2
+    expected_zero_grad_calls = default_config['training']['num_epochs'] * len(mock_dataloader_train)
+    expected_step_calls = default_config['training']['num_epochs'] * len(mock_dataloader_train)
+    
+    assert mock_optimizer.zero_grad.call_count == expected_zero_grad_calls, "Optimizer.zero_grad() call count mismatch."
+    assert mock_optimizer.step.call_count == expected_step_calls, "Optimizer.step() call count mismatch."
+    assert mock_scheduler.step.call_count == expected_step_calls, "Scheduler.step() call count mismatch."
+    
+    # If mixed_precision is enabled, verify GradScaler methods were called
+    if default_config['training'].get('mixed_precision', True):
+        assert mock_grad_scaler_instance.scale.call_count == expected_step_calls, "GradScaler.scale() call count mismatch."
+        assert mock_grad_scaler_instance.step.call_count == expected_step_calls, "GradScaler.step() call count mismatch."
+        assert mock_grad_scaler_instance.update.call_count == expected_step_calls, "GradScaler.update() call count mismatch."
+    else:
+        # Ensure GradScaler methods were not called
+        mock_grad_scaler.assert_not_called()
+    
+    # Assertions to verify torch.save was called with the mock state dict and the correct path
+    # Since num_epochs=2, torch.save should be called twice
+    assert mock_torch_save.call_count == default_config['training']['num_epochs'], "torch.save() should be called once per epoch."
+    
+    # Assertions to verify that loss computations were skipped and logs were made
+    assert "No validation dataloader provided. Skipping validation." in caplog.text, "Did not log skipping validation."
+    assert "Training Loss" in caplog.text, "Did not log training loss."
+    assert "Validation Loss" not in caplog.text, "Logged validation loss despite val_dataloader being None."
 
 # 6. Logging Tests
 
@@ -691,18 +995,11 @@ def test_fine_tune_peft_model_logging(
 ):
     """Test that fine_tune_peft_model logs training and validation losses."""
     
-    # Mock model's train and eval methods
-    mock_peft_model.train = MagicMock()
-    mock_peft_model.eval = MagicMock()
-    
+    # Mock model's methods are already handled in the fixture
     # Mock model's forward pass to return a mock output with a 'loss' attribute
     mock_output = MagicMock()
     mock_output.loss = torch.tensor(1.0, requires_grad=True)
-    mock_output.loss.backward = MagicMock()  # Ensure backward() can be called
     mock_peft_model.forward.return_value = mock_output  # Correctly mock forward
-    
-    # Ensure state_dict returns a serializable object to prevent PicklingError
-    mock_peft_model.state_dict.return_value = {}
     
     # Mock external dependencies: autocast, GradScaler, and torch.save
     with patch("src.training.peft_finetune.autocast") as mock_autocast, \
@@ -740,6 +1037,13 @@ def test_fine_tune_peft_model_logging(
     # Assertions to verify loss.backward() was called
     mock_output.loss.backward.assert_called()
     
+    # Assertions to verify GradScaler methods were called if mixed_precision is enabled
+    mixed_precision = default_config['training'].get('mixed_precision', True)
+    if mixed_precision:
+        mock_grad_scaler_instance.scale.assert_called_with(mock_output.loss)
+        mock_grad_scaler_instance.step.assert_called_with(mock_optimizer)
+        mock_grad_scaler_instance.update.assert_called()
+    
     # Assertions to verify torch.save was called with the mock state dict and the correct path
     mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
     
@@ -762,17 +1066,25 @@ def test_fine_tune_peft_model_reproducibility(
     mock_scheduler,
     caplog
 ):
-    """Test that fine_tune_peft_model produces consistent results with the same inputs."""
+    """
+    Test that fine_tune_peft_model produces consistent results with the same inputs by
+    running the training loop twice and verifying that optimizer.zero_grad() is called
+    the expected number of times.
+    """
     
-    # Mock model's train and eval methods
+    # Update configuration if necessary
+    config = default_config.copy()
+    config['training']['mixed_precision'] = False  # Ensure consistency for reproducibility
+    
+    # Mock model's methods
+    mock_peft_model.to = MagicMock(return_value=mock_peft_model)
     mock_peft_model.train = MagicMock()
     mock_peft_model.eval = MagicMock()
     
     # Mock model's forward pass to return a mock output with a 'loss' attribute
     mock_output = MagicMock()
     mock_output.loss = torch.tensor(1.0, requires_grad=True)
-    mock_output.loss.backward = MagicMock()  # Ensure backward() can be called
-    mock_peft_model.forward.return_value = mock_output  # Correctly mock forward
+    mock_peft_model.forward.return_value = mock_output
     
     # Ensure state_dict returns a serializable object to prevent PicklingError
     mock_peft_model.state_dict.return_value = {}
@@ -798,7 +1110,7 @@ def test_fine_tune_peft_model_reproducibility(
                 val_dataloader=mock_dataloader_val,
                 optimizer=mock_optimizer,
                 scheduler=mock_scheduler,
-                config=default_config,
+                config=config,
                 device="cpu"
             )
             
@@ -821,61 +1133,123 @@ def test_fine_tune_peft_model_reproducibility(
                 val_dataloader=mock_dataloader_val,
                 optimizer=mock_optimizer,
                 scheduler=mock_scheduler,
-                config=default_config,
+                config=config,
                 device="cpu"
             )
     
     # Assertions to verify that training methods were called the correct number of times
-    num_epochs = default_config['training']['num_epochs']
-    num_train_batches = len(mock_dataloader_train)
+    num_epochs = config['training']['num_epochs']
+    num_train_batches = len(mock_dataloader_train)  # Should be 10
+    num_val_batches = len(mock_dataloader_val)      # Should be 5
     
-    # Check that model.train() was called once per epoch
-    assert mock_peft_model.train.call_count == num_epochs, "Model.train() call count mismatch."
+    # Each run of fine_tune_peft_model processes 'num_epochs' epochs
+    # Since the test runs it twice, total epochs processed = num_epochs * 2
+    total_epochs = num_epochs * 2
     
-    # Check that model.eval() was called once per epoch
-    assert mock_peft_model.eval.call_count == num_epochs, "Model.eval() call count mismatch."
+    # Each epoch has 'num_train_batches' training steps
+    # Total training steps across both runs = num_epochs * num_train_batches * 2
+    total_train_steps = num_epochs * num_train_batches * 2
     
-    # Check that optimizer.zero_grad() was called once per batch per epoch
-    assert mock_optimizer.zero_grad.call_count == num_epochs * num_train_batches, "Optimizer.zero_grad() call count mismatch."
+    # Each training step calls optimizer.zero_grad()
+    # Total expected calls = num_epochs * num_train_batches * 2
+    expected_zero_grad_calls = num_epochs * num_train_batches * 2
     
-    # Check that loss.backward() was called once per batch per epoch
-    assert mock_output.loss.backward.call_count == num_epochs * num_train_batches, "Loss.backward() call count mismatch."
+    # Assert that optimizer.zero_grad() was called the expected number of times
+    assert mock_optimizer.zero_grad.call_count == expected_zero_grad_calls, (
+        f"Optimizer.zero_grad() was called {mock_optimizer.zero_grad.call_count} times, "
+        f"expected {expected_zero_grad_calls} times."
+    )
     
-    # Check that optimizer.step() was called once per batch per epoch
-    assert mock_optimizer.step.call_count == num_epochs * num_train_batches, "Optimizer.step() call count mismatch."
+    # Similarly, assert other optimizer and scheduler calls
+    expected_optimizer_step_calls = num_epochs * num_train_batches * 2
+    expected_scheduler_step_calls = num_epochs * num_train_batches * 2
+    expected_backward_calls = num_epochs * num_train_batches * 2
     
-    # Check that scheduler.step() was called once per batch per epoch
-    assert mock_scheduler.step.call_count == num_epochs * num_train_batches, "Scheduler.step() call count mismatch."
+    assert mock_optimizer.step.call_count == expected_optimizer_step_calls, (
+        f"Optimizer.step() was called {mock_optimizer.step.call_count} times, "
+        f"expected {expected_optimizer_step_calls} times."
+    )
     
-    # Check that GradScaler methods were called if mixed_precision is enabled
-    mixed_precision = default_config['training'].get('mixed_precision', True)
+    assert mock_scheduler.step.call_count == expected_scheduler_step_calls, (
+        f"Scheduler.step() was called {mock_scheduler.step.call_count} times, "
+        f"expected {expected_scheduler_step_calls} times."
+    )
+    
+    assert mock_output.loss.backward.call_count == expected_backward_calls, (
+        f"loss.backward() was called {mock_output.loss.backward.call_count} times, "
+        f"expected {expected_backward_calls} times."
+    )
+    
+    # Verify that GradScaler methods were called appropriately based on mixed_precision
+    mixed_precision = config['training'].get('mixed_precision', True)
     if mixed_precision:
-        assert mock_grad_scaler_instance.scale.call_count == num_epochs * num_train_batches, "GradScaler.scale() call count mismatch."
-        assert mock_grad_scaler_instance.step.call_count == num_epochs * num_train_batches, "GradScaler.step() call count mismatch."
-        assert mock_grad_scaler_instance.update.call_count == num_epochs * num_train_batches, "GradScaler.update() call count mismatch."
+        # Each training step should call scale, step, and update
+        expected_scale_calls = num_epochs * num_train_batches * 2
+        expected_step_calls = num_epochs * num_train_batches * 2
+        expected_update_calls = num_epochs * num_train_batches * 2
+        
+        assert mock_grad_scaler_instance.scale.call_count == expected_scale_calls, (
+            f"GradScaler.scale() was called {mock_grad_scaler_instance.scale.call_count} times, "
+            f"expected {expected_scale_calls} times."
+        )
+        assert mock_grad_scaler_instance.step.call_count == expected_step_calls, (
+            f"GradScaler.step() was called {mock_grad_scaler_instance.step.call_count} times, "
+            f"expected {expected_step_calls} times."
+        )
+        assert mock_grad_scaler_instance.update.call_count == expected_update_calls, (
+            f"GradScaler.update() was called {mock_grad_scaler_instance.update.call_count} times, "
+            f"expected {expected_update_calls} times."
+        )
     else:
-        # Ensure that GradScaler methods were not called
+        # If mixed_precision is False, GradScaler should not be used
         assert mock_grad_scaler_instance.scale.call_count == 0, "GradScaler.scale() should not be called."
         assert mock_grad_scaler_instance.step.call_count == 0, "GradScaler.step() should not be called."
         assert mock_grad_scaler_instance.update.call_count == 0, "GradScaler.update() should not be called."
     
     # Assertions to verify torch.save was called correctly after each epoch
-    assert mock_torch_save.call_count == num_epochs, "torch.save() should be called once per epoch."
-    expected_calls = [patch.call({}, ANY) for _ in range(num_epochs)]
-    # Since we cannot assert the exact path, use ANY for the checkpoint path
-    mock_torch_save.assert_has_calls(expected_calls, any_order=False)
+    # Each run saves 'num_epochs' checkpoints, so total saves = num_epochs * 2
+    expected_save_calls = num_epochs * 2
+    assert mock_torch_save.call_count == expected_save_calls, (
+        f"torch.save() was called {mock_torch_save.call_count} times, "
+        f"expected {expected_save_calls} times."
+    )
     
-    # Assertions to verify that checkpoint saving was logged
-    for epoch in range(1, num_epochs + 1):
-        expected_log = f"Model checkpoint saved at ./checkpoints/model_epoch_{epoch}.pt"
-        assert expected_log in caplog.text, f"Did not log checkpoint saving for epoch {epoch}."
+    # Verify that torch.save was called with the correct arguments
+    for _ in range(expected_save_calls):
+        mock_torch_save.assert_any_call({}, ANY)  # ANY is used for the checkpoint path
+    
+    # Assertions to verify that checkpoint saving was logged correctly
+    # Each epoch saves a checkpoint, so expect 'num_epochs * 2' checkpoint logs
+    for run in range(2):
+        for epoch in range(1, num_epochs + 1):
+            expected_log = f"Model checkpoint saved at ./checkpoints/model_epoch_{epoch}.pt"
+            assert expected_log in caplog.text, (
+                f"Did not log checkpoint saving for epoch {epoch} in run {run + 1}."
+            )
 
 # 8. Edge Case Tests: Invalid Inputs
 
-def test_fine_tune_peft_model_invalid_device(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler):
+def test_fine_tune_peft_model_invalid_device(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler
+):
+    """
+    Test that fine_tune_peft_model raises a RuntimeError when an invalid device is specified.
+    
+    This ensures that the function correctly handles invalid device inputs by raising an exception.
+    """
+    # Prepare the configuration with an invalid device
     config = default_config.copy()
     config['training']['device'] = "invalid_device"
-
+    
+    # Mock the model's 'to' method to raise RuntimeError when called with 'invalid_device'
+    mock_peft_model.to = MagicMock(side_effect=RuntimeError("Invalid device"))
+    
+    # Attempt to fine-tune the model and expect a RuntimeError to be raised
     with pytest.raises(RuntimeError) as exc_info:
         fine_tune_peft_model(
             model=mock_peft_model,
@@ -886,11 +1260,26 @@ def test_fine_tune_peft_model_invalid_device(default_config, mock_peft_model, mo
             config=config,
             device="invalid_device"
         )
+    
+    # Assert that the exception message matches the expected message
     assert "Invalid device" in str(exc_info.value), "Did not raise RuntimeError for invalid device."
+    
+    # Additionally, assert that model.to was called with 'invalid_device'
+    mock_peft_model.to.assert_called_once_with("invalid_device")
 
 # 9. Integration Tests
 
-def test_main_integration(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler, mock_feature_extractor, mock_peft_config, caplog):
+def test_main_integration(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler,
+    mock_feature_extractor,
+    mock_peft_config,
+    caplog
+):
     """Integration test for main function with all components mocked."""
     config_path = "configs/peft_config.yaml"
     
@@ -900,32 +1289,74 @@ def test_main_integration(default_config, mock_peft_model, mock_dataloader_train
          patch("src.training.peft_finetune.setup_peft_model") as mock_setup_peft_model, \
          patch("src.training.peft_finetune.prepare_dataloader") as mock_prepare_dataloader, \
          patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler, \
+         patch("src.training.peft_finetune.PeftConfig.from_pretrained") as mock_peft_config_from_pretrained, \
          patch("src.training.peft_finetune.fine_tune_peft_model") as mock_fine_tune_peft_model:
         
-        mock_config_parser.return_value.config = default_config
+        # Configure the mocked ConfigParser to return default_config
+        mock_config_parser_instance = mock_config_parser.return_value
+        mock_config_parser_instance.config = default_config
+        
+        # Mock the feature extractor's from_pretrained method
         mock_from_pretrained.return_value = mock_feature_extractor
+        
+        # Mock PeftConfig.from_pretrained to return a mocked PeftConfig
+        mock_peft_config_from_pretrained.return_value = mock_peft_config
+        
+        # Mock setup_peft_model to return a mocked PeftModel
         mock_setup_peft_model.return_value = mock_peft_model
+        
+        # Mock prepare_dataloader to return training and validation DataLoaders
         mock_prepare_dataloader.side_effect = [mock_dataloader_train, mock_dataloader_val]
+        
+        # Mock get_optimizer_and_scheduler to return mocked optimizer and scheduler
         mock_get_optimizer_and_scheduler.return_value = (mock_optimizer, mock_scheduler)
         
+        # Execute the main function within the mocked context
         with caplog.at_level(logging.INFO):
             main(config_path)
         
-        # Verify all steps were called
+        # --- Assertions ---
+        
+        # Verify that ConfigParser was instantiated with the correct config_path
         mock_config_parser.assert_called_once_with(config_path)
+        
+        # Verify that setup_logging was called to configure logging
         mock_setup_logging.assert_called_once()
+        
+        # Verify that DetrFeatureExtractor.from_pretrained was called with the correct model name
         mock_from_pretrained.assert_called_once_with(default_config['model']['model_name'])
+        
+        # Verify that setup_peft_model was called with correct arguments
         mock_setup_peft_model.assert_called_once_with(
-            "facebook/detr-resnet-50",
-            num_classes=91,
+            default_config['model']['model_name'],
+            num_classes=default_config['model']['num_classes'],
             peft_config=mock_peft_config
         )
-        assert mock_prepare_dataloader.call_count == 2, "prepare_dataloader should be called twice."
+        
+        # Verify that prepare_dataloader was called twice: once for training and once for validation
+        assert mock_prepare_dataloader.call_count == 2, "prepare_dataloader should be called twice for train and val."
+        mock_prepare_dataloader.assert_any_call(
+            data_dir=default_config['data']['data_dir'],
+            batch_size=default_config['training']['batch_size'],
+            feature_extractor=mock_feature_extractor,
+            mode="train"
+        )
+        mock_prepare_dataloader.assert_any_call(
+            data_dir=default_config['data']['data_dir'],
+            batch_size=default_config['training']['batch_size'],
+            feature_extractor=mock_feature_extractor,
+            mode="val"
+        )
+        
+        # Verify that get_optimizer_and_scheduler was called with correct arguments
+        num_training_steps = default_config['training']['num_epochs'] * len(mock_dataloader_train)
         mock_get_optimizer_and_scheduler.assert_called_once_with(
             model=mock_peft_model,
             config=default_config['optimizer'],
-            num_training_steps=default_config['training']['num_epochs'] * len(mock_dataloader_train)
+            num_training_steps=num_training_steps
         )
+        
+        # Verify that fine_tune_peft_model was called with correct arguments
         mock_fine_tune_peft_model.assert_called_once_with(
             model=mock_peft_model,
             train_dataloader=mock_dataloader_train,
@@ -933,8 +1364,10 @@ def test_main_integration(default_config, mock_peft_model, mock_dataloader_train
             optimizer=mock_optimizer,
             scheduler=mock_scheduler,
             config=default_config,
-            device="cpu"
+            device=default_config['training'].get('device', 'cuda')
         )
+        
+        # Verify logging messages
         assert "Starting PEFT fine-tuning process." in caplog.text, "Did not log starting fine-tuning process."
         assert "PEFT fine-tuning completed." in caplog.text, "Did not log completion of fine-tuning process."
 

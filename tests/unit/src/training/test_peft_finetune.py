@@ -467,26 +467,68 @@ def test_fine_tune_peft_model_checkpoint_saving(default_config, mock_peft_model,
         # Check that torch.save was called twice (for 2 epochs)
         assert mock_torch_save.call_count == default_config['training']['num_epochs'], "Checkpoints not saved for each epoch."
 
-def test_fine_tune_peft_model_empty_dataloader(default_config, mock_peft_model, mock_optimizer, mock_scheduler, caplog):
+def test_fine_tune_peft_model_empty_dataloader(
+    default_config,
+    mock_peft_model,
+    mock_optimizer,
+    mock_scheduler,
+    caplog
+):
     """Test fine_tune_peft_model with empty training and validation dataloaders."""
+    
+    # Create an empty DataLoader mock
     empty_dataloader = MagicMock(spec=DataLoader)
     empty_dataloader.__len__.return_value = 0
+    empty_dataloader.__iter__.return_value = iter([])  # Ensure the iterator is empty
     
-    with patch("src.training.peft_finetune.tqdm") as mock_tqdm:
-        with caplog.at_level(logging.INFO):
-            fine_tune_peft_model(
-                model=mock_peft_model,
-                train_dataloader=empty_dataloader,
-                val_dataloader=empty_dataloader,
-                optimizer=mock_optimizer,
-                scheduler=mock_scheduler,
-                config=default_config,
-                device="cpu"
-            )
+    # Mock model's train and eval methods
+    mock_peft_model.train = MagicMock()
+    mock_peft_model.eval = MagicMock()
     
-    # Check that loss computations were skipped
-    assert "Training Loss" in caplog.text, "Did not log training loss."
-    assert "Validation Loss" in caplog.text, "Did not log validation loss."
+    # Ensure state_dict returns a serializable object to prevent PicklingError
+    mock_peft_model.state_dict.return_value = {}
+    
+    # Mock external dependencies: autocast, GradScaler, and torch.save
+    with patch("src.training.peft_finetune.autocast") as mock_autocast, \
+         patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
+         patch("torch.save") as mock_torch_save:
+        
+        # Configure the mocked autocast context manager to do nothing
+        mock_autocast.return_value = MagicMock()
+        
+        # Configure the mocked GradScaler instance to do nothing
+        mock_grad_scaler_instance = MagicMock()
+        mock_grad_scaler.return_value = mock_grad_scaler_instance
+        
+        # Mock tqdm to simply return the iterator without any progress bar interference
+        with patch("src.training.peft_finetune.tqdm", side_effect=lambda x, desc: x):
+            # Execute the fine_tune_peft_model function within the mocked context
+            with caplog.at_level(logging.INFO):
+                fine_tune_peft_model(
+                    model=mock_peft_model,
+                    train_dataloader=empty_dataloader,
+                    val_dataloader=empty_dataloader,
+                    optimizer=mock_optimizer,
+                    scheduler=mock_scheduler,
+                    config=default_config,
+                    device="cpu"
+                )
+    
+    # Assertions to verify that training and validation methods were called
+    mock_peft_model.train.assert_called()
+    mock_peft_model.eval.assert_called()
+    
+    # Since dataloaders are empty, optimizer steps should not be called
+    mock_optimizer.zero_grad.assert_not_called()
+    mock_optimizer.step.assert_not_called()
+    mock_scheduler.step.assert_not_called()
+    
+    # Check that torch.save was called with the mock state_dict and any checkpoint path
+    mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
+    
+    # Assertions to verify that loss computations were skipped and logs were made
+    assert "Training Loss: 0.0" in caplog.text, "Did not log training loss."
+    assert "Validation Loss: 0.0" in caplog.text, "Did not log validation loss."
 
 # 4. Tests for main
 

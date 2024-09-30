@@ -358,7 +358,6 @@ def test_fine_tune_peft_model_mixed_precision(
     caplog
 ):
     """Test fine_tune_peft_model with mixed precision enabled."""
-    
     # Update configuration to enable mixed precision
     config = default_config.copy()
     config['training']['mixed_precision'] = True
@@ -370,8 +369,8 @@ def test_fine_tune_peft_model_mixed_precision(
     # Mock model's forward pass to return a mock output with a 'loss' attribute
     mock_output = MagicMock()
     mock_output.loss = torch.tensor(1.0, requires_grad=True)
-    mock_output.loss.backward = MagicMock()  # Ensure backward() can be called
-    mock_peft_model.__call__.return_value = mock_output  # model(...) returns mock_output
+    mock_output.loss.backward = MagicMock()
+    mock_peft_model.__call__.return_value = mock_output
     
     # Ensure state_dict returns a serializable object to prevent PicklingError
     mock_peft_model.state_dict.return_value = {}
@@ -386,7 +385,11 @@ def test_fine_tune_peft_model_mixed_precision(
         
         # Configure the mocked GradScaler instance and its methods
         mock_grad_scaler_instance = MagicMock()
+        mock_grad_scaler_instance.scale.return_value = mock_output.loss  # Ensure scaler.scale(loss) returns a mock loss
         mock_grad_scaler.return_value = mock_grad_scaler_instance
+        
+        # Mock torch.save to prevent PicklingError
+        mock_torch_save.return_value = None
         
         # Execute the fine_tune_peft_model function within the mocked context
         with caplog.at_level(logging.INFO):
@@ -399,31 +402,31 @@ def test_fine_tune_peft_model_mixed_precision(
                 config=config,
                 device="cpu"
             )
-        
-        # Assertions to verify that training methods were called
-        mock_peft_model.train.assert_called()
-        
-        # Assertions to verify optimizer and scheduler methods were called
-        mock_optimizer.zero_grad.assert_called()
-        mock_optimizer.step.assert_called()
-        mock_scheduler.step.assert_called()
-        
-        # Assertions to verify loss.backward() was called
-        mock_output.loss.backward.assert_called()
-        
-        # Assertions to verify GradScaler methods were called
-        mock_grad_scaler_instance.scale.assert_called_with(mock_output.loss)
-        mock_grad_scaler_instance.step.assert_called_with(mock_optimizer)
-        mock_grad_scaler_instance.update.assert_called()
-        
-        # Assertions to verify model.eval() was called during validation
-        mock_peft_model.eval.assert_called()
-        
-        # Assertions to verify torch.save was called with the mock state dict and the correct path
-        mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
-        
-        # Assertion to verify that checkpoint saving was logged
-        assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, 
+    
+    # Assertions to verify that training methods were called
+    mock_peft_model.train.assert_called()
+    
+    # Assertions to verify optimizer and scheduler methods were called
+    mock_optimizer.zero_grad.assert_called()
+    mock_optimizer.step.assert_called()
+    mock_scheduler.step.assert_called()
+    
+    # Assertions to verify loss.backward() was called
+    mock_output.loss.backward.assert_called()
+    
+    # Assertions to verify GradScaler methods were called
+    mock_grad_scaler_instance.scale.assert_called_with(mock_output.loss)
+    mock_grad_scaler_instance.step.assert_called_with(mock_optimizer)
+    mock_grad_scaler_instance.update.assert_called()
+    
+    # Assertions to verify model.eval() was called during validation
+    mock_peft_model.eval.assert_called()
+    
+    # Assertions to verify torch.save was called with the mock state dict and the correct path
+    mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
+    
+    # Assertion to verify that checkpoint saving was logged
+    assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, "Did not log checkpoint saving."
 
 def test_fine_tune_peft_model_error_during_training(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler):
     """Test that fine_tune_peft_model raises an error when an exception occurs during training."""

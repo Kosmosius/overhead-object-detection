@@ -680,18 +680,43 @@ def test_fine_tune_peft_model_no_validation(default_config, mock_peft_model, moc
 
 # 6. Logging Tests
 
-def test_fine_tune_peft_model_logging(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler, caplog):
+def test_fine_tune_peft_model_logging(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler,
+    caplog
+):
     """Test that fine_tune_peft_model logs training and validation losses."""
-    # Mock model's forward pass
-    mock_peft_model.return_value.loss = torch.tensor(1.0, requires_grad=True)
     
+    # Mock model's train and eval methods
+    mock_peft_model.train = MagicMock()
+    mock_peft_model.eval = MagicMock()
+    
+    # Mock model's forward pass to return a mock output with a 'loss' attribute
+    mock_output = MagicMock()
+    mock_output.loss = torch.tensor(1.0, requires_grad=True)
+    mock_output.loss.backward = MagicMock()  # Ensure backward() can be called
+    mock_peft_model.__call__.return_value = mock_output  # model(...) returns mock_output
+    
+    # Ensure state_dict returns a serializable object to prevent PicklingError
+    mock_peft_model.state_dict.return_value = {}
+    
+    # Mock external dependencies: autocast, GradScaler, and torch.save
     with patch("src.training.peft_finetune.autocast") as mock_autocast, \
-         patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler:
+         patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
+         patch("torch.save") as mock_torch_save:
         
+        # Configure the mocked autocast context manager
         mock_autocast.return_value = MagicMock()
+        
+        # Configure the mocked GradScaler instance
         mock_grad_scaler_instance = MagicMock()
         mock_grad_scaler.return_value = mock_grad_scaler_instance
         
+        # Execute the fine_tune_peft_model function within the mocked context
         with caplog.at_level(logging.INFO):
             fine_tune_peft_model(
                 model=mock_peft_model,
@@ -703,10 +728,28 @@ def test_fine_tune_peft_model_logging(default_config, mock_peft_model, mock_data
                 device="cpu"
             )
         
+        # Assertions to verify that training methods were called
+        mock_peft_model.train.assert_called()
+        mock_peft_model.eval.assert_called()
+        
+        # Assertions to verify optimizer and scheduler methods were called
+        mock_optimizer.zero_grad.assert_called()
+        mock_optimizer.step.assert_called()
+        mock_scheduler.step.assert_called()
+        
+        # Assertions to verify loss.backward() was called
+        mock_output.loss.backward.assert_called()
+        
+        # Assertions to verify torch.save was called with the mock state dict and the correct path
+        mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
+        
+        # Assertion to verify that checkpoint saving was logged
+        assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, "Did not log checkpoint saving."
+        
+        # Additional Assertions for Logging
         assert "Starting Epoch 1/2" in caplog.text, "Did not log start of epoch."
         assert "Training Loss: 1.0" in caplog.text, "Did not log training loss."
         assert "Validation Loss: 1.0" in caplog.text, "Did not log validation loss."
-        assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, "Did not log checkpoint saving."
 
 # 7. Reproducibility Tests
 

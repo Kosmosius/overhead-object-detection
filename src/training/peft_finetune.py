@@ -3,6 +3,7 @@
 import os
 import torch
 import logging
+from typing import Optional
 from tqdm import tqdm
 from datasets import load_dataset
 from torch.cuda.amp import autocast, GradScaler

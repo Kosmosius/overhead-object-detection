@@ -5,6 +5,7 @@ import pytest
 import torch
 import logging
 from unittest.mock import patch, MagicMock, mock_open, ANY
+from torchvision.datasets import CocoDetection
 from src.training.peft_finetune import (
     setup_peft_model,
     prepare_dataloader,

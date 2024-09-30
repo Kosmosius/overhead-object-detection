@@ -81,7 +81,7 @@ def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFe
 def fine_tune_peft_model(
     model: PeftModel,
     train_dataloader: torch.utils.data.DataLoader,
-    val_dataloader: torch.utils.data.DataLoader,
+    val_dataloader: Optional[torch.utils.data.DataLoader],
     optimizer,
     scheduler,
     config: dict,
@@ -93,7 +93,7 @@ def fine_tune_peft_model(
     Args:
         model (PeftModel): The model to be fine-tuned.
         train_dataloader (torch.utils.data.DataLoader): Dataloader for training data.
-        val_dataloader (torch.utils.data.DataLoader): Dataloader for validation data.
+        val_dataloader (Optional[torch.utils.data.DataLoader]): Dataloader for validation data.
         optimizer (torch.optim.Optimizer): Optimizer for fine-tuning.
         scheduler (torch.optim.lr_scheduler): Scheduler for learning rate adjustment.
         config (dict): Configuration settings for training (epochs, mixed_precision, etc.).
@@ -121,8 +121,12 @@ def fine_tune_peft_model(
             target = [{k: v.to(device) for k, v in t.items()} for t in target]
 
             with autocast(enabled=mixed_precision):
-                outputs = model(pixel_values=pixel_values, labels=target)
-                loss = outputs.loss
+                try:
+                    outputs = model(pixel_values=pixel_values, labels=target)
+                    loss = outputs.loss
+                except Exception as e:
+                    logger.error(f"Error during forward pass: {e}")
+                    raise
 
             if mixed_precision:
                 scaler.scale(loss).backward()
@@ -144,25 +148,45 @@ def fine_tune_peft_model(
         logger.info(f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {avg_train_loss}")
 
         # Validation loop
-        model.eval()
-        val_loss = 0.0
-        with torch.no_grad():
-            for batch in tqdm(val_dataloader, desc=f"Validating Epoch {epoch + 1}/{num_epochs}"):
-                # Assume validation steps are implemented here
-                pass  # Placeholder
+        if val_dataloader is not None:
+            model.eval()
+            val_loss = 0.0
+            logger.info(f"Starting Validation for Epoch {epoch + 1}/{num_epochs}")
 
-        if len(val_dataloader) > 0:
-            avg_val_loss = val_loss / len(val_dataloader)
+            with torch.no_grad():
+                for batch in tqdm(val_dataloader, desc=f"Validating Epoch {epoch + 1}/{num_epochs}"):
+                    try:
+                        pixel_values, target = batch
+                        pixel_values = pixel_values.to(device)
+                        target = [{k: v.to(device) for k, v in t.items()} for t in target]
+
+                        with autocast(enabled=mixed_precision):
+                            outputs = model(pixel_values=pixel_values, labels=target)
+                            loss = outputs.loss
+                        
+                        val_loss += loss.item()
+                    except Exception as e:
+                        logger.error(f"Error during validation: {e}")
+                        raise
+
+            if len(val_dataloader) > 0:
+                avg_val_loss = val_loss / len(val_dataloader)
+            else:
+                avg_val_loss = 0.0
+                logger.warning("Validation dataloader is empty. Setting average validation loss to 0.0.")
+
+            logger.info(f"Epoch {epoch + 1}/{num_epochs}, Validation Loss: {avg_val_loss}")
         else:
-            avg_val_loss = 0.0
-            logger.warning("Validation dataloader is empty. Setting average validation loss to 0.0.")
-
-        logger.info(f"Epoch {epoch + 1}/{num_epochs}, Validation Loss: {avg_val_loss}")
+            logger.info("No validation dataloader provided. Skipping validation.")
 
         # Save checkpoint
         checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")
-        torch.save(model.state_dict(), checkpoint_path)
-        logger.info(f"Model checkpoint saved at {checkpoint_path}")
+        try:
+            torch.save(model.state_dict(), checkpoint_path)
+            logger.info(f"Model checkpoint saved at {checkpoint_path}")
+        except Exception as e:
+            logger.error(f"Error saving checkpoint: {e}")
+            raise
 
 def main(config_path: str) -> None:
     """

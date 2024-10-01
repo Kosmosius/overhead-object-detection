@@ -118,6 +118,15 @@ def configure_optimizer(model: torch.nn.Module, config: Dict[str, Any]) -> torch
     Returns:
         torch.optim.Optimizer: Configured optimizer based on the config file.
     """
+    optimizer_type = config.get('optimizer_type', 'AdamW')
+    learning_rate = config.get('learning_rate', 1e-4)
+
+    if learning_rate <= 0:
+        raise ValueError("Learning rate must be a positive value.")
+
+    if optimizer_type == 'AdamW':
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, **config.get('optimizer_kwargs', {}))
+    
     return get_optimizer(
         model=model,
         optimizer_type=config.get("optimizer_type", "adamw"),

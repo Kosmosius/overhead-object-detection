@@ -5,6 +5,10 @@ from torch.optim import SGD, Adam, RMSprop, AdamW
 from transformers import get_scheduler, SchedulerType
 from typing import Optional, List, Dict, Any, Tuple
 from torch.optim.lr_scheduler import _LRScheduler
+import logging
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 # Define the mapping from SchedulerType to scheduler functions or string identifiers
 TYPE_TO_SCHEDULER_FUNCTION = {

@@ -356,8 +356,10 @@ def test_fine_tune_peft_model_training_loop(
     
     # 2. Mock model's forward method to return a mock output with 'loss'
     mock_output = MagicMock()
+    # Ensure loss.item() returns a float
     mock_output.loss = MagicMock()
     mock_output.loss.item.return_value = 1.0
+    # Ensure loss.backward() is a mock method
     mock_output.loss.backward = MagicMock()
     mock_peft_model.forward.return_value = mock_output
     
@@ -383,6 +385,9 @@ def test_fine_tune_peft_model_training_loop(
             mock_grad_scaler.return_value = mock_grad_scaler_instance
             # Mock scaler.scale(loss) to return the scaled loss
             mock_grad_scaler_instance.scale.return_value = mock_output.loss
+            # Mock scaler.step and scaler.update
+            mock_grad_scaler_instance.step = MagicMock()
+            mock_grad_scaler_instance.update = MagicMock()
         else:
             # If mixed_precision is disabled, GradScaler is not used
             mock_grad_scaler.return_value = None
@@ -390,7 +395,29 @@ def test_fine_tune_peft_model_training_loop(
         # 4c. Mock torch.save to prevent actual file I/O
         mock_torch_save.return_value = None
         
-        # 5. Execute the function within the context manager to capture logs
+        # 5. Mock the data loaders to return a valid batch
+        # Each batch should be a tuple: (pixel_values, target)
+        # pixel_values: tensor of shape (batch_size, 3, 224, 224)
+        # target: dict with keys 'labels' and 'boxes'
+        batch_size = default_config['training']['batch_size']
+        num_classes = default_config['model']['num_classes']
+        
+        # Create a sample batch
+        sample_pixel_values = torch.randn(batch_size, 3, 224, 224)
+        sample_labels = torch.randint(0, num_classes, (batch_size,))
+        sample_boxes = torch.randn(batch_size, 4)
+        sample_target = {"labels": sample_labels, "boxes": sample_boxes}
+        sample_batch = (sample_pixel_values, sample_target)
+        
+        # Configure the mock_dataloader_train to return the sample_batch
+        mock_dataloader_train.__iter__.return_value = iter([sample_batch])
+        mock_dataloader_train.__len__.return_value = 1  # Assuming one batch per epoch
+        
+        # Similarly, configure the mock_dataloader_val to return the sample_batch
+        mock_dataloader_val.__iter__.return_value = iter([sample_batch])
+        mock_dataloader_val.__len__.return_value = 1  # Assuming one batch per epoch
+        
+        # 6. Execute the function within the context manager to capture logs
         with caplog.at_level(logging.INFO):
             fine_tune_peft_model(
                 model=mock_peft_model,
@@ -402,36 +429,38 @@ def test_fine_tune_peft_model_training_loop(
                 device="cpu"
             )
     
-    # 6. Assertions to verify that model methods were called
+    # 7. Assertions to verify that model methods were called
     mock_peft_model.train.assert_called()
     mock_peft_model.eval.assert_called()
     
-    # 7. Assertions to verify optimizer and scheduler methods were called
-    mock_optimizer.zero_grad.assert_called()
-    mock_optimizer.step.assert_called()
-    mock_scheduler.step.assert_called()
+    # 8. Assertions to verify optimizer and scheduler methods were called
+    # zero_grad should be called once per batch
+    mock_optimizer.zero_grad.assert_called_once()
+    # step should be called once per batch
+    mock_optimizer.step.assert_called_once()
+    # scheduler.step should be called once per batch
+    mock_scheduler.step.assert_called_once()
     
-    # 8. Assertions to verify loss.backward() was called
-    mock_output.loss.backward.assert_called()
+    # 9. Assertions to verify loss.backward() was called
+    mock_output.loss.backward.assert_called_once()
     
-    # 9. Assertions to verify GradScaler methods were called if mixed_precision is enabled
+    # 10. Assertions to verify GradScaler methods were called if mixed_precision is enabled
     if mixed_precision:
-        mock_grad_scaler_instance.scale.assert_called_with(mock_output.loss)
-        mock_grad_scaler_instance.step.assert_called_with(mock_optimizer)
-        mock_grad_scaler_instance.update.assert_called()
+        mock_grad_scaler_instance.scale.assert_called_once_with(mock_output.loss)
+        mock_grad_scaler_instance.step.assert_called_once_with(mock_optimizer)
+        mock_grad_scaler_instance.update.assert_called_once()
     
-    # 10. Assertions to verify torch.save was called with the mock state_dict and correct path
-    # Adjust the expected dictionary based on what fine_tune_peft_model actually saves
-    expected_save_call = {
+    # 11. Assertions to verify torch.save was called with the mock state_dict and correct path
+    # Define expected dictionary
+    expected_save_dict = {
         'epoch': ANY,
         'model_state_dict': mock_peft_model.state_dict(),
         'optimizer_state_dict': mock_optimizer.state_dict(),
         'scheduler_state_dict': mock_scheduler.state_dict(),
     }
-    mock_torch_save.assert_called_with(expected_save_call, ANY)
+    mock_torch_save.assert_called_with(expected_save_dict, ANY)
     
-    # 11. Assertions to verify that checkpoint saving was logged
-    # Adjust the expected checkpoint path based on epoch and config
+    # 12. Assertions to verify that checkpoint saving was logged
     for epoch in range(default_config['training']['num_epochs']):
         expected_log = f"Model checkpoint saved at ./checkpoints/model_epoch_{epoch + 1}.pt"
         assert expected_log in caplog.text, f"Did not log checkpoint saving for epoch {epoch + 1}."

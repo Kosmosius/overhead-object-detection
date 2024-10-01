@@ -356,16 +356,18 @@ def test_fine_tune_peft_model_training_loop(
     
     # 2. Mock model's forward method to return a mock output with 'loss'
     mock_output = MagicMock()
-    mock_output.loss = torch.tensor(1.0, requires_grad=True)
+    mock_output.loss = MagicMock()
+    mock_output.loss.item.return_value = 1.0
+    mock_output.loss.backward = MagicMock()
     mock_peft_model.forward.return_value = mock_output
     
     # 3. Mock state_dict to return a serializable object
     mock_peft_model.state_dict.return_value = {}
     
     # 4. Mock external dependencies: autocast, GradScaler, and torch.save
-    with patch("src.training.peft_finetune.autocast") as mock_autocast, \
-         patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
-         patch("torch.save") as mock_torch_save:
+    with patch("src.training.peft_finetune.autocast", autospec=True) as mock_autocast, \
+         patch("src.training.peft_finetune.GradScaler", autospec=True) as mock_grad_scaler, \
+         patch("torch.save", autospec=True) as mock_torch_save:
         
         # 4a. Mock autocast as a context manager that does nothing
         mock_autocast_context = MagicMock()
@@ -419,10 +421,20 @@ def test_fine_tune_peft_model_training_loop(
         mock_grad_scaler_instance.update.assert_called()
     
     # 10. Assertions to verify torch.save was called with the mock state_dict and correct path
-    mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
+    # Adjust the expected dictionary based on what fine_tune_peft_model actually saves
+    expected_save_call = {
+        'epoch': ANY,
+        'model_state_dict': mock_peft_model.state_dict(),
+        'optimizer_state_dict': mock_optimizer.state_dict(),
+        'scheduler_state_dict': mock_scheduler.state_dict(),
+    }
+    mock_torch_save.assert_called_with(expected_save_call, ANY)
     
     # 11. Assertions to verify that checkpoint saving was logged
-    assert "Model checkpoint saved at ./checkpoints/model_epoch_1.pt" in caplog.text, "Did not log checkpoint saving."
+    # Adjust the expected checkpoint path based on epoch and config
+    for epoch in range(default_config['training']['num_epochs']):
+        expected_log = f"Model checkpoint saved at ./checkpoints/model_epoch_{epoch + 1}.pt"
+        assert expected_log in caplog.text, f"Did not log checkpoint saving for epoch {epoch + 1}."
 
 def test_fine_tune_peft_model_mixed_precision(
     default_config,

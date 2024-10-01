@@ -18,7 +18,7 @@ from peft import PeftModel, PeftConfig, get_peft_model
 # Set up logging
 logger = logging.getLogger(__name__)
 
-def setup_peft_model(pretrained_model_name: str, num_classes: int, peft_config: PeftConfig) -> PeftModel:
+def setup_peft_model(model_name: str, num_classes: int, peft_config: PeftConfig) -> PeftModel:
     """
     Set up a PEFT model by applying PEFT-specific configurations to a pre-trained model.
 
@@ -209,7 +209,11 @@ def main(config_path: str) -> None:
 
     # Prepare PEFT model
     peft_config = PeftConfig.from_pretrained(config['model']['peft_model_path'])
-    model = setup_peft_model(config['model']['model_name'], config['model']['num_classes'], peft_config)
+    model = setup_peft_model(
+        model_name=config['model']['model_name'],
+        num_classes=config['model']['num_classes'],
+        peft_config=peft_config
+    )
 
     # Prepare dataloaders
     train_loader = prepare_dataloader(

@@ -204,41 +204,52 @@ def main(config_path: str) -> None:
     setup_logging()
     logger.info("Starting PEFT fine-tuning process.")
 
+    # Provide default values for missing configuration sections
+    data_config = config.get('data', {})
+    model_config = config.get('model', {})
+    training_config = config.get('training', {})
+    optimizer_config = config.get('optimizer', {})
+    loss_config = config.get('loss', {})
+
+    # Validate essential configuration fields
+    required_data_fields = ['data_dir']
+    for field in required_data_fields:
+        if field not in data_config:
+            raise KeyError(f"Missing required data configuration field: '{field}'")
+
     # Prepare feature extractor
-    feature_extractor = DetrFeatureExtractor.from_pretrained(config['model']['model_name'])
+    feature_extractor = DetrFeatureExtractor.from_pretrained(model_config['model_name'])
 
     # Prepare PEFT model
-    peft_config = PeftConfig.from_pretrained(config['model']['peft_model_path'])
+    peft_config = PeftConfig.from_pretrained(model_config['peft_model_path'])
     model = setup_peft_model(
-        model_name=config['model']['model_name'],
-        num_classes=config['model']['num_classes'],
+        model_name=model_config['model_name'],
+        num_classes=model_config['num_classes'],
         peft_config=peft_config
     )
 
     # Prepare dataloaders
     train_loader = prepare_dataloader(
-        data_dir=config['data']['data_dir'],
-        batch_size=config['training']['batch_size'],
+        data_dir=data_config['data_dir'],
+        batch_size=training_config['batch_size'],
         feature_extractor=feature_extractor,
         mode="train"
     )
-
     val_loader = prepare_dataloader(
-        data_dir=config['data']['data_dir'],
-        batch_size=config['training']['batch_size'],
+        data_dir=data_config['data_dir'],
+        batch_size=training_config['batch_size'],
         feature_extractor=feature_extractor,
         mode="val"
     )
 
     # Set up optimizer and scheduler
-    num_training_steps = config['training']['num_epochs'] * len(train_loader)
     optimizer, scheduler = get_optimizer_and_scheduler(
         model=model,
-        config=config['optimizer'],
-        num_training_steps=num_training_steps
+        config=optimizer_config,
+        num_training_steps=training_config['num_epochs'] * len(train_loader)
     )
 
-    # Fine-tune PEFT model
+    # Fine-tune the model
     fine_tune_peft_model(
         model=model,
         train_dataloader=train_loader,
@@ -246,10 +257,13 @@ def main(config_path: str) -> None:
         optimizer=optimizer,
         scheduler=scheduler,
         config=config,
-        device=config['training'].get('device', 'cuda')
+        device=training_config.get('device', 'cpu')
     )
 
-    logger.info("PEFT fine-tuning completed.")
+    # Save the final model
+    final_model_path = os.path.join(training_config.get('output_dir', './output'), 'final_model.pt')
+    torch.save(model.state_dict(), final_model_path)
+    logger.info(f"Final model saved at {final_model_path}")
 
 if __name__ == "__main__":
     config_path = "configs/peft_config.yaml"

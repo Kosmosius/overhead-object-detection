@@ -205,6 +205,10 @@ def get_optimizer_and_scheduler(
         Tuple[torch.optim.Optimizer, Optional[_LRScheduler]]: 
             Optimizer and scheduler objects.
     """
+    parameter_groups = config.get('parameter_groups', [])
+    if not parameter_groups:
+        raise KeyError("'params' key is missing in parameter_groups")
+    
     optimizer = configure_optimizer(model, config)
     scheduler = configure_scheduler(optimizer, num_training_steps, config)
 

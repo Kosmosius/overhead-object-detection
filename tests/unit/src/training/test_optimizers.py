@@ -24,10 +24,11 @@ def default_config():
     """Fixture for default optimizer and scheduler configuration."""
     return {
         "optimizer_type": "adamw",
-        "lr": 5e-5,  # Changed from 'learning_rate' to 'lr'
+        "lr": 5e-5,
         "weight_decay": 0.01,
         "scheduler_type": "linear",
         "num_warmup_steps": 0
+        # 'parameter_groups' is intentionally omitted to test its optionality
     }
 
 @pytest.fixture
@@ -35,13 +36,13 @@ def custom_config():
     """Fixture for custom optimizer and scheduler configuration."""
     return {
         "optimizer_type": "sgd",
-        "lr": 0.1,  # Changed from 'learning_rate' to 'lr'
+        "lr": 0.1,
         "weight_decay": 0.001,
         "scheduler_type": "cosine",
         "num_warmup_steps": 100,
         "parameter_groups": [
-            {"params": "group1", "lr": 0.05},  # Changed to use 'lr'
-            {"params": "group2", "lr": 0.1, "weight_decay": 0.0001}  # Changed to use 'lr'
+            {"params": "group1", "lr": 0.05},  # Will be updated in tests to use actual parameters
+            {"params": "group2", "lr": 0.1, "weight_decay": 0.0001}
         ]
     }
 
@@ -228,12 +229,11 @@ def test_configure_scheduler_unsupported_type(mock_model, default_config):
     assert "Unsupported scheduler type 'unsupported_scheduler'." in str(exc_info.value), "Did not raise ValueError for unsupported scheduler type."
 
 def test_configure_scheduler_missing_fields(default_config, mock_model):
-    """Test that configure_scheduler uses default values when some config fields are missing."""
+    """Test that configure_scheduler raises ValueError when required scheduler fields are missing."""
     optimizer = configure_optimizer(mock_model, default_config)
     config = {
         "scheduler_type": "linear",
-        # Missing 'num_warmup_steps'
-        # Missing 'num_training_steps'
+        # Missing 'num_warmup_steps' and 'num_training_steps'
     }
     with pytest.raises(ValueError) as exc_info:
         configure_scheduler(optimizer, num_training_steps=None, config=config)
@@ -607,7 +607,6 @@ def test_get_optimizer_and_scheduler_scheduler_dependent_on_optimizer(custom_con
         {"params": [param1], "lr": 0.05, "weight_decay": 0.001},
         {"params": [param2], "lr": 0.1, "weight_decay": 0.0001}
     ]
-
     # Set scheduler type to something specific, e.g., cosine
     custom_config["scheduler_type"] = "cosine"
 

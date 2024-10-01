@@ -118,18 +118,34 @@ def fine_tune_peft_model(
             optimizer.zero_grad()
 
             pixel_values, target = batch
-            pixel_values = pixel_values.to(device)
-            target = [{k: v.to(device) for k, v in t.items()} for t in target]
+
+            # Validate and move pixel_values to device
+            if isinstance(pixel_values, list):
+                pixel_values = torch.stack(pixel_values).to(device)
+            elif isinstance(pixel_values, torch.Tensor):
+                pixel_values = pixel_values.to(device)
+            else:
+                raise TypeError("pixel_values must be a list or torch.Tensor")
+
+            # Validate and move targets to device
+            if isinstance(target, dict):
+                required_fields = ['labels', 'boxes']
+                for field in required_fields:
+                    if field not in target:
+                        raise KeyError(f"Missing '{field}' in target")
+                    if not isinstance(target[field], torch.Tensor):
+                        raise TypeError(f"'{field}' in target must be a torch.Tensor")
+                target = {k: v.to(device) for k, v in target.items()}
+            elif isinstance(target, list):
+                target = [{k: v.to(device) for k, v in t.items()} for t in target]
+            else:
+                raise TypeError("target must be a dict or list of dicts")
 
             with autocast(enabled=mixed_precision):
-                try:
-                    outputs = model(pixel_values=pixel_values, labels=target)
-                    loss = outputs.loss
-                except Exception as e:
-                    logger.error(f"Error during forward pass: {e}")
-                    raise
+                outputs = model(pixel_values, target)
+                loss = outputs.loss
 
-            if mixed_precision:
+            if scaler:
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
@@ -138,56 +154,62 @@ def fine_tune_peft_model(
                 optimizer.step()
 
             scheduler.step()
+
             train_loss += loss.item()
 
-        if len(train_dataloader) > 0:
-            avg_train_loss = train_loss / len(train_dataloader)
-        else:
-            avg_train_loss = 0.0
-            logger.warning("Training dataloader is empty. Setting average training loss to 0.0.")
-
-        logger.info(f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {avg_train_loss}")
+        avg_train_loss = train_loss / len(train_dataloader)
+        logger.info(f"Epoch {epoch + 1}, Training Loss: {avg_train_loss}")
 
         # Validation loop
-        if val_dataloader is not None:
+        if val_dataloader:
             model.eval()
             val_loss = 0.0
             logger.info(f"Starting Validation for Epoch {epoch + 1}/{num_epochs}")
 
             with torch.no_grad():
                 for batch in tqdm(val_dataloader, desc=f"Validating Epoch {epoch + 1}/{num_epochs}"):
-                    try:
-                        pixel_values, target = batch
+                    pixel_values, target = batch
+
+                    # Validate and move pixel_values to device
+                    if isinstance(pixel_values, list):
+                        pixel_values = torch.stack(pixel_values).to(device)
+                    elif isinstance(pixel_values, torch.Tensor):
                         pixel_values = pixel_values.to(device)
+                    else:
+                        raise TypeError("pixel_values must be a list or torch.Tensor")
+
+                    # Validate and move targets to device
+                    if isinstance(target, dict):
+                        required_fields = ['labels', 'boxes']
+                        for field in required_fields:
+                            if field not in target:
+                                raise KeyError(f"Missing '{field}' in target")
+                            if not isinstance(target[field], torch.Tensor):
+                                raise TypeError(f"'{field}' in target must be a torch.Tensor")
+                        target = {k: v.to(device) for k, v in target.items()}
+                    elif isinstance(target, list):
                         target = [{k: v.to(device) for k, v in t.items()} for t in target]
+                    else:
+                        raise TypeError("target must be a dict or list of dicts")
 
-                        with autocast(enabled=mixed_precision):
-                            outputs = model(pixel_values=pixel_values, labels=target)
-                            loss = outputs.loss
-                        
-                        val_loss += loss.item()
-                    except Exception as e:
-                        logger.error(f"Error during validation: {e}")
-                        raise
+                    with autocast(enabled=mixed_precision):
+                        outputs = model(pixel_values, target)
+                        loss = outputs.loss
 
-            if len(val_dataloader) > 0:
-                avg_val_loss = val_loss / len(val_dataloader)
-            else:
-                avg_val_loss = 0.0
-                logger.warning("Validation dataloader is empty. Setting average validation loss to 0.0.")
+                    val_loss += loss.item()
 
-            logger.info(f"Epoch {epoch + 1}/{num_epochs}, Validation Loss: {avg_val_loss}")
-        else:
-            logger.info("No validation dataloader provided. Skipping validation.")
+            avg_val_loss = val_loss / len(val_dataloader)
+            logger.info(f"Epoch {epoch + 1}, Validation Loss: {avg_val_loss}")
 
         # Save checkpoint
         checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")
-        try:
-            torch.save(model.state_dict(), checkpoint_path)
-            logger.info(f"Model checkpoint saved at {checkpoint_path}")
-        except Exception as e:
-            logger.error(f"Error saving checkpoint: {e}")
-            raise
+        torch.save({
+            'epoch': epoch + 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+        }, checkpoint_path)
+        logger.info(f"Model checkpoint saved at {checkpoint_path}")
 
 def main(config_path: str) -> None:
     """

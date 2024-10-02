@@ -5,6 +5,9 @@ from torch.optim import SGD, Adam, RMSprop, AdamW
 from transformers import get_scheduler, SchedulerType
 from typing import Optional, List, Dict, Any, Tuple
 from torch.optim.lr_scheduler import _LRScheduler
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Define the mapping from SchedulerType to scheduler functions or string identifiers
 TYPE_TO_SCHEDULER_FUNCTION = {
@@ -77,7 +80,7 @@ def get_optimizer(
         # Ensure no overlapping parameters across groups
         seen_params = set()
         for group in parameter_groups:
-            if "params" not in group:
+            if 'params' not in group:
                 raise ValueError("Each parameter group must have a 'params' list.")
             params = group["params"]
             if not isinstance(params, list):
@@ -97,7 +100,7 @@ def get_optimizer(
         if lr <= 0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if weight_decay < 0:
-            raise ValueError(f"Invalid weight decay: {weight_decay}")
+            raise ValueError(f"Invalid weight_decay: {weight_decay}")
         params = model.parameters()
 
     try:
@@ -143,6 +146,10 @@ def configure_scheduler(
         Optional[_LRScheduler]: Configured scheduler or None if not applicable.
     """
     scheduler_type = config.get("scheduler_type", "linear")
+    if scheduler_type is None:
+        logger.info("No scheduler configured.")
+        return None
+
     num_warmup_steps = config.get("num_warmup_steps", 0)
     # Exclude scheduler-related and optimizer-related keys
     excluded_keys = [

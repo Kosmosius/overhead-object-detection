@@ -23,7 +23,7 @@ def setup_peft_model(model_name: str, num_classes: int, peft_config: PeftConfig)
     Set up a PEFT model by applying PEFT-specific configurations to a pre-trained model.
 
     Args:
-        pretrained_model_name (str): HuggingFace model name or path (e.g., "facebook/detr-resnet-50").
+        model_name (str): HuggingFace model name or path (e.g., "facebook/detr-resnet-50").
         num_classes (int): Number of object detection classes.
         peft_config (PeftConfig): Configuration for PEFT fine-tuning.
 
@@ -31,9 +31,9 @@ def setup_peft_model(model_name: str, num_classes: int, peft_config: PeftConfig)
         PeftModel: PEFT-configured model.
     """
     try:
-        model = DetrForObjectDetection.from_pretrained(pretrained_model_name, num_labels=num_classes)
+        model = DetrForObjectDetection.from_pretrained(model_name, num_labels=num_classes)
         peft_model = get_peft_model(model, peft_config)
-        logger.info(f"PEFT model successfully initialized with {pretrained_model_name}.")
+        logger.info(f"PEFT model successfully initialized with {model_name}.")
         return peft_model
     except Exception as e:
         error_message = f"Error setting up PEFT model: {e}"
@@ -59,6 +59,10 @@ def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFe
         ann_file = os.path.join(data_dir, f'annotations/instances_{mode}2017.json')
         img_dir = os.path.join(data_dir, f'{mode}2017')
 
+        # Validate that feature_extractor is callable
+        if not callable(feature_extractor):
+            raise TypeError("feature_extractor must be callable.")
+
         dataset = CocoDetection(
             root=img_dir,
             annFile=ann_file,
@@ -79,6 +83,73 @@ def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFe
         logger.error(f"Error preparing dataloader: {e}")
         raise
 
+def _train_one_epoch(model, dataloader, optimizer, scaler, scheduler, device, mixed_precision):
+    model.train()
+    total_loss = 0.0
+    for batch in tqdm(dataloader, desc="Training"):
+        optimizer.zero_grad()
+        pixel_values, targets = batch
+        pixel_values = prepare_inputs(pixel_values, device)
+        targets = prepare_targets(targets, device)
+
+        with autocast(enabled=mixed_precision):
+            outputs = model(pixel_values, targets)
+            loss = outputs.loss
+
+        if scaler:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
+
+        scheduler.step()
+        total_loss += loss.item()
+    avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
+    return avg_loss
+
+def _validate_one_epoch(model, dataloader, device, mixed_precision):
+    model.eval()
+    total_loss = 0.0
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Validation"):
+            pixel_values, targets = batch
+            pixel_values = prepare_inputs(pixel_values, device)
+            targets = prepare_targets(targets, device)
+
+            with autocast(enabled=mixed_precision):
+                outputs = model(pixel_values, targets)
+                loss = outputs.loss
+
+            total_loss += loss.item()
+    avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
+    return avg_loss
+
+def _prepare_inputs(pixel_values, device):
+    if isinstance(pixel_values, list):
+        pixel_values = torch.stack(pixel_values).to(device)
+    elif isinstance(pixel_values, torch.Tensor):
+        pixel_values = pixel_values.to(device)
+    else:
+        raise TypeError("pixel_values must be a list or torch.Tensor")
+    return pixel_values
+
+def _prepare_targets(targets, device):
+    if isinstance(targets, dict):
+        required_fields = ['labels', 'boxes']
+        for field in required_fields:
+            if field not in targets:
+                raise KeyError(f"Missing '{field}' in target")
+            if not isinstance(targets[field], torch.Tensor):
+                raise TypeError(f"'{field}' in target must be a torch.Tensor")
+        targets = {k: v.to(device) for k, v in targets.items()}
+    elif isinstance(targets, list):
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+    else:
+        raise TypeError("target must be a dict or list of dicts")
+    return targets
+
 def fine_tune_peft_model(
     model: PeftModel,
     train_dataloader: torch.utils.data.DataLoader,
@@ -89,7 +160,7 @@ def fine_tune_peft_model(
     device: str = "cuda"
 ) -> None:
     """
-    Fine-tune a PEFT model with a training and validation loop.
+    Fine-tune a PEFT model with training and validation loops.
 
     Args:
         model (PeftModel): The model to be fine-tuned.
@@ -109,97 +180,29 @@ def fine_tune_peft_model(
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     for epoch in range(num_epochs):
-        model.train()
-        train_loss = 0.0
         logger.info(f"Starting Epoch {epoch + 1}/{num_epochs}")
 
-        # Training loop
-        for batch in tqdm(train_dataloader, desc=f"Training Epoch {epoch + 1}/{num_epochs}"):
-            optimizer.zero_grad()
+        # Training
+        train_loss = train_one_epoch(
+            model=model,
+            dataloader=train_dataloader,
+            optimizer=optimizer,
+            scaler=scaler,
+            scheduler=scheduler,
+            device=device,
+            mixed_precision=mixed_precision
+        )
+        logger.info(f"Epoch {epoch + 1}, Training Loss: {train_loss}")
 
-            pixel_values, target = batch
-
-            # Validate and move pixel_values to device
-            if isinstance(pixel_values, list):
-                pixel_values = torch.stack(pixel_values).to(device)
-            elif isinstance(pixel_values, torch.Tensor):
-                pixel_values = pixel_values.to(device)
-            else:
-                raise TypeError("pixel_values must be a list or torch.Tensor")
-
-            # Validate and move targets to device
-            if isinstance(target, dict):
-                required_fields = ['labels', 'boxes']
-                for field in required_fields:
-                    if field not in target:
-                        raise KeyError(f"Missing '{field}' in target")
-                    if not isinstance(target[field], torch.Tensor):
-                        raise TypeError(f"'{field}' in target must be a torch.Tensor")
-                target = {k: v.to(device) for k, v in target.items()}
-            elif isinstance(target, list):
-                target = [{k: v.to(device) for k, v in t.items()} for t in target]
-            else:
-                raise TypeError("target must be a dict or list of dicts")
-
-            with autocast(enabled=mixed_precision):
-                outputs = model(pixel_values, target)
-                loss = outputs.loss
-
-            if scaler:
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                optimizer.step()
-
-            scheduler.step()
-
-            train_loss += loss.item()
-
-        avg_train_loss = train_loss / len(train_dataloader)
-        logger.info(f"Epoch {epoch + 1}, Training Loss: {avg_train_loss}")
-
-        # Validation loop
+        # Validation
         if val_dataloader:
-            model.eval()
-            val_loss = 0.0
-            logger.info(f"Starting Validation for Epoch {epoch + 1}/{num_epochs}")
-
-            with torch.no_grad():
-                for batch in tqdm(val_dataloader, desc=f"Validating Epoch {epoch + 1}/{num_epochs}"):
-                    pixel_values, target = batch
-
-                    # Validate and move pixel_values to device
-                    if isinstance(pixel_values, list):
-                        pixel_values = torch.stack(pixel_values).to(device)
-                    elif isinstance(pixel_values, torch.Tensor):
-                        pixel_values = pixel_values.to(device)
-                    else:
-                        raise TypeError("pixel_values must be a list or torch.Tensor")
-
-                    # Validate and move targets to device
-                    if isinstance(target, dict):
-                        required_fields = ['labels', 'boxes']
-                        for field in required_fields:
-                            if field not in target:
-                                raise KeyError(f"Missing '{field}' in target")
-                            if not isinstance(target[field], torch.Tensor):
-                                raise TypeError(f"'{field}' in target must be a torch.Tensor")
-                        target = {k: v.to(device) for k, v in target.items()}
-                    elif isinstance(target, list):
-                        target = [{k: v.to(device) for k, v in t.items()} for t in target]
-                    else:
-                        raise TypeError("target must be a dict or list of dicts")
-
-                    with autocast(enabled=mixed_precision):
-                        outputs = model(pixel_values, target)
-                        loss = outputs.loss
-
-                    val_loss += loss.item()
-
-            avg_val_loss = val_loss / len(val_dataloader)
-            logger.info(f"Epoch {epoch + 1}, Validation Loss: {avg_val_loss}")
+            val_loss = validate_one_epoch(
+                model=model,
+                dataloader=val_dataloader,
+                device=device,
+                mixed_precision=mixed_precision
+            )
+            logger.info(f"Epoch {epoch + 1}, Validation Loss: {val_loss}")
 
         # Save checkpoint
         checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")

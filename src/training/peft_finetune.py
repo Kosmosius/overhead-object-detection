@@ -6,6 +6,8 @@ import logging
 from typing import Optional
 from tqdm import tqdm
 from datasets import load_dataset
+from torch import amp
+from torch.amp import autocast
 from torch.cuda.amp import autocast, GradScaler
 from torchvision.datasets import CocoDetection
 from transformers import DetrFeatureExtractor, DetrForObjectDetection
@@ -122,6 +124,8 @@ def _validate_one_epoch(model, dataloader, device, mixed_precision):
     model.eval()
     total_loss = 0.0
     with torch.no_grad():
+        if len(dataloader) == 0:
+            logger.warning("Validation dataloader is empty.")
         for batch in tqdm(dataloader, desc="Validation"):
             pixel_values, targets = batch
             pixel_values = _prepare_inputs(pixel_values, device)

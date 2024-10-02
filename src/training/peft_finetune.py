@@ -183,7 +183,7 @@ def fine_tune_peft_model(
         logger.info(f"Starting Epoch {epoch + 1}/{num_epochs}")
 
         # Training
-        train_loss = train_one_epoch(
+        train_loss = _train_one_epoch(  # Corrected function call
             model=model,
             dataloader=train_dataloader,
             optimizer=optimizer,
@@ -196,7 +196,7 @@ def fine_tune_peft_model(
 
         # Validation
         if val_dataloader:
-            val_loss = validate_one_epoch(
+            val_loss = _validate_one_epoch(  # Corrected function call
                 model=model,
                 dataloader=val_dataloader,
                 device=device,
@@ -240,7 +240,9 @@ def main(config_path: str) -> None:
     required_data_fields = ['data_dir']
     for field in required_data_fields:
         if field not in data_config:
-            raise KeyError(f"Missing required data configuration field: '{field}'")
+            error_message = f"Missing required data configuration field: '{field}'"
+            logger.error(error_message)
+            raise KeyError(error_message)
 
     # Prepare feature extractor
     feature_extractor = DetrFeatureExtractor.from_pretrained(model_config['model_name'])

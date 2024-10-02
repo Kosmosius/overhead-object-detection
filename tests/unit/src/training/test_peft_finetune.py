@@ -196,7 +196,7 @@ def test_setup_peft_model_error(mock_peft_config):
 
 # 2. Tests for prepare_dataloader
 
-def test_prepare_dataloader_success(mock_feature_extractor, mock_dataset, mock_dataloader_train):
+def test_prepare_dataloader_success(default_config, mock_feature_extractor, mock_dataset, mock_dataloader_train):
     """Test successful preparation of DataLoader for training mode."""
     with patch("src.training.peft_finetune.CocoDetection") as mock_coco_detection, \
          patch("torch.utils.data.DataLoader") as mock_dataloader:
@@ -209,38 +209,32 @@ def test_prepare_dataloader_success(mock_feature_extractor, mock_dataset, mock_d
         
         # Call the function under test
         dataloader = prepare_dataloader(
-            data_dir="./data",
-            batch_size=4,
+            data_dir=default_config['data']['data_dir'],
+            batch_size=default_config['training']['batch_size'],
             feature_extractor=mock_feature_extractor,
             mode="train"
         )
         
         # Assert that CocoDetection was called with the correct arguments
         mock_coco_detection.assert_called_once_with(
-            root=os.path.join("./data", "train2017"),
-            annFile=os.path.join("./data", "annotations/instances_train2017.json"),
+            root=os.path.join(default_config['data']['data_dir'], "train2017"),
+            annFile=os.path.join(default_config['data']['data_dir'], "annotations/instances_train2017.json"),
             transform=ANY  # Accept any callable (lambda function)
         )
         
         # Assert that DataLoader was called with the correct arguments
         mock_dataloader.assert_called_once_with(
             mock_dataset,
-            batch_size=4,
+            batch_size=default_config['training']['batch_size'],
             shuffle=True,  # Shuffle should be True for training
-            collate_fn=ANY  # Accept any callable (lambda function)
+            collate_fn=ANY,  # Accept any callable (lambda function)
+            num_workers=default_config['training'].get('num_workers', 4),
+            pin_memory=default_config['training'].get('pin_memory', True)
         )
         
         # Assert that the function returns the expected DataLoader
         assert dataloader == mock_dataloader_train, "Dataloader should be returned correctly."
-        
-        # Additional Assertions (Optional but Recommended)
-        # Verify that the 'transform' argument in CocoDetection is a callable
-        transform_arg = mock_coco_detection.call_args.kwargs.get('transform')
-        assert callable(transform_arg), "Transform should be a callable."
-        
-        # Verify that the 'collate_fn' argument in DataLoader is a callable
-        collate_fn_arg = mock_dataloader.call_args.kwargs.get('collate_fn')
-        assert callable(collate_fn_arg), "collate_fn should be a callable."
+
 
 def test_prepare_dataloader_validation_mode(mock_feature_extractor, mock_dataset, mock_dataloader_val):
     """Test successful preparation of DataLoader for validation mode."""

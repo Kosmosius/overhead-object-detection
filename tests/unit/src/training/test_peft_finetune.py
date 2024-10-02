@@ -1134,21 +1134,19 @@ def test_main_integration(
             optimizer=mock_optimizer,
             scheduler=mock_scheduler,
             config=default_config,
-            device=torch.device(default_config['training']['device']),
-            checkpoint_dir=default_config['training']['checkpoint_dir']
+            device=default_config['training']['device']
         )
 
         # Verify that the final model was saved
         mock_peft_model.save.assert_called_once_with(
-            os.path.join(default_config['training']['output_dir'], 'final_model'),
-            metadata=mock_peft_model.state_dict()
+            os.path.join(default_config['training']['output_dir'], 'final_model.pt')
         )
 
         # Check logging
         assert "Feature extractor 'facebook/detr-resnet-50' loaded successfully." in caplog.text, "Feature extractor loading log missing."
         assert f"Model '{default_config['model']['model_name']}' initialized and moved to device '{default_config['training']['device']}'." in caplog.text, "Model initialization log missing."
         assert "Training completed." in caplog.text, "Training completion log missing."
-
+           
 # 10. Edge Case Tests: Invalid Parameter Groups
 
 def test_get_optimizer_and_scheduler_invalid_parameter_groups(

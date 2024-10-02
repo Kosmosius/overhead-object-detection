@@ -718,9 +718,9 @@ def test_fine_tune_peft_model_large_batch_size(
     # Mock dataloader to simulate a single large batch
     large_batch = (
         torch.randn(10000, 3, 224, 224),  # Pixel values as tensor
-        {"labels": torch.randint(0, 91, (10000,)), "boxes": torch.randn(10000, 4)}
+        [{"labels": torch.randint(0, 91, (1,)), "boxes": torch.randn(1, 4)} for _ in range(10000)]
     )
-
+    
     # Configure the mock_dataloader_train to return a single large batch
     mock_dataloader_train.__iter__.return_value = iter([large_batch])
     mock_dataloader_train.__len__.return_value = 1  # Only one batch
@@ -729,7 +729,7 @@ def test_fine_tune_peft_model_large_batch_size(
     mock_dataloader_val.__iter__.return_value = iter([large_batch])
     mock_dataloader_val.__len__.return_value = 1  # Only one batch
 
-    # Mock the model's methods
+    # Mock model's methods
     mock_peft_model.to = MagicMock(return_value=mock_peft_model)
     mock_peft_model.train = MagicMock()
     mock_peft_model.eval = MagicMock()

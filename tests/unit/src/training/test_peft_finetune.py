@@ -988,13 +988,12 @@ def test_fine_tune_peft_model_reproducibility(
     actual_zero_grad_calls = mock_optimizer.zero_grad.call_count
     assert actual_zero_grad_calls == total_expected_zero_grad_calls, \
         f"Optimizer.zero_grad() call count mismatch. Expected: {total_expected_zero_grad_calls}, Actual: {actual_zero_grad_calls}"
-
-    # Assertions to verify that backward was called in both runs
-    expected_backward_calls_per_run = config['training']['num_epochs'] * len(mock_dataloader_train)
-    total_expected_backward_calls = expected_backward_calls_per_run * 2
+    
+    # Additionally, verify that backward was called the expected number of times
+    expected_backward_calls = total_expected_zero_grad_calls
     actual_backward_calls = mock_output.loss.backward.call_count
-    assert actual_backward_calls == total_expected_backward_calls, \
-        f"loss.backward() call count mismatch. Expected: {total_expected_backward_calls}, Actual: {actual_backward_calls}"
+    assert actual_backward_calls == expected_backward_calls, \
+        f"loss.backward() call count mismatch. Expected: {expected_backward_calls}, Actual: {actual_backward_calls}"
 
 # 8. Edge Case Tests: Invalid Inputs
 

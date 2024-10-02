@@ -604,10 +604,6 @@ def test_get_optimizer_and_scheduler_scheduler_none(default_config, mock_model):
         assert optimizer.param_groups[0]['weight_decay'] == config["weight_decay"], "Weight decay mismatch."
 
         # Check scheduler
-        mock_get_scheduler.assert_called_once_with(
-            name=None,  # Since scheduler_type is None
-            optimizer=optimizer,
-            num_warmup_steps=0,
-            num_training_steps=1000
-        )
+        mock_get_scheduler.assert_not_called(), "get_scheduler should not be called when scheduler_type is None."
         assert scheduler is None, "Scheduler should be None."
+

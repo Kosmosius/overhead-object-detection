@@ -438,14 +438,22 @@ def test_fine_tune_peft_model_mixed_precision(
     assert mock_optimizer.zero_grad.call_count == expected_zero_grad_calls, \
         f"Optimizer.zero_grad() should be called {expected_zero_grad_calls} times, but was called {mock_optimizer.zero_grad.call_count} times."
 
-def test_fine_tune_peft_model_error_during_training(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler):
+def test_fine_tune_peft_model_error_during_training(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler
+):
     """Test that fine_tune_peft_model raises an error when an exception occurs during training."""
     # Mock model's forward pass to raise an exception
-    mock_peft_model.return_value.loss = torch.tensor(1.0, requires_grad=True)
-    
-    with patch("src.training.peft_finetune.autocast") as mock_autocast:
-        mock_autocast.side_effect = Exception("Training failed")
-        
+    mock_peft_model.forward.side_effect = Exception("Training failed")
+
+    # Mock external dependencies: autocast, GradScaler, and torch.save
+    with patch("src.training.peft_finetune.autocast"), \
+         patch("src.training.peft_finetune.GradScaler"), \
+         patch("src.training.peft_finetune.torch.save"):
         with pytest.raises(Exception) as exc_info:
             fine_tune_peft_model(
                 model=mock_peft_model,
@@ -1158,24 +1166,22 @@ def test_get_optimizer_and_scheduler_invalid_parameter_groups(
     mock_dataloader_train,
     mock_dataloader_val,
     mock_optimizer,
-    mock_scheduler,
-    caplog
+    mock_scheduler
 ):
     """Test that get_optimizer_and_scheduler handles invalid parameter groups correctly."""
     # Modify the optimizer configuration to have invalid parameter groups (missing 'params' key)
     config = default_config.copy()
     config['optimizer']['parameter_groups'] = [{"lr": 0.01}]  # Missing 'params' key
 
-    # Attempt to get optimizer and scheduler, expecting a KeyError
-    with pytest.raises(KeyError) as exc_info:
+    with pytest.raises(ValueError) as exc_info:
         get_optimizer_and_scheduler(
             model=mock_peft_model,
             config=config['optimizer'],
             num_training_steps=1000
         )
 
-    assert "'params' key is missing in parameter_groups" in str(exc_info.value), \
-        "Expected KeyError for missing 'params' in parameter_groups"
+    assert "Each parameter group must have a 'params' list." in str(exc_info.value), \
+        "Expected ValueError for missing 'params' in parameter_groups"
 
 # 11. Edge Case Tests: Extremely High Weight Decay
 
@@ -1303,23 +1309,18 @@ def test_main_missing_configuration_fields(caplog):
          patch("src.training.peft_finetune.fine_tune_peft_model") as mock_fine_tune_peft_model:
 
         mock_config_parser.return_value.config = incomplete_config
-        mock_from_pretrained.return_value = MagicMock(spec=DetrFeatureExtractor)
-        mock_setup_peft_model.return_value = MagicMock(spec=PeftModel)
-        mock_prepare_dataloader.side_effect = [MagicMock(spec=torch.utils.data.DataLoader), MagicMock(spec=torch.utils.data.DataLoader)]
-        mock_get_optimizer_and_scheduler.return_value = (MagicMock(spec=torch.optim.Optimizer), MagicMock(spec=torch.optim.lr_scheduler.LRScheduler))
-        mock_peft_config_from_pretrained.return_value = MagicMock(spec=PeftConfig)
 
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.ERROR):
             with pytest.raises(KeyError) as exc_info:
                 main(config_path)
 
-    # Assertions to verify that the correct KeyError was raised
-    assert "Missing required data configuration field: 'data_dir'" in str(exc_info.value), \
-        "Expected KeyError for missing 'data_dir' in 'data' configuration"
+        # Assertions to verify that the correct KeyError was raised
+        assert "Missing required data configuration field: 'data_dir'" in str(exc_info.value), \
+            "Expected KeyError for missing 'data_dir' in 'data' configuration"
 
-    # Optionally, check that an error was logged
-    assert "Missing required data configuration field: 'data_dir'" in caplog.text, \
-        "Error log for missing 'data_dir' is missing."
+        # Assert that the error was logged
+        assert "Missing required data configuration field: 'data_dir'" in caplog.text, \
+            "Error log for missing 'data_dir' is missing."
 
 # 15. Edge Case Tests: Extremely Large Number of Training Steps
 
@@ -1335,8 +1336,9 @@ def test_configure_scheduler_large_num_training_steps(
     config['optimizer']['num_warmup_steps'] = 1000
     num_training_steps = 1000000  # Extremely large
 
-    # Mock model's parameters to return a non-empty list
-    mock_peft_model.parameters.return_value = [MagicMock()]  # At least one parameter
+    # Mock model's parameters to return actual torch.nn.Parameter instances
+    mock_parameter = torch.nn.Parameter(torch.randn(1, requires_grad=True))
+    mock_peft_model.parameters.return_value = [mock_parameter]
 
     with patch("src.training.optimizers.get_scheduler") as mock_get_scheduler:
         mock_scheduler_instance = MagicMock(spec=torch.optim.lr_scheduler.LRScheduler)
@@ -1352,7 +1354,8 @@ def test_configure_scheduler_large_num_training_steps(
     # Assertions to verify that optimizer and scheduler were set up correctly
     mock_peft_model.parameters.assert_called_once()
     mock_get_scheduler.assert_called_once_with(
-        optimizer=mock_optimizer,
+        name="linear",
+        optimizer=optimizer,
         num_warmup_steps=1000,
         num_training_steps=1000000
     )
@@ -1382,7 +1385,7 @@ def test_prepare_dataloader_collate_function(mock_feature_extractor, caplog):
 # 17. Edge Case Tests: Non-Callable Transform Function
 
 def test_prepare_dataloader_non_callable_transform(mock_feature_extractor, caplog):
-    """Test prepare_dataloader when transform is not callable."""
+    """Test prepare_dataloader when feature_extractor is not callable."""
     with patch("src.training.peft_finetune.CocoDetection") as mock_coco_detection:
         # Set transform to a non-callable object
         mock_coco_detection.return_value = MagicMock(spec=CocoDetection)
@@ -1392,15 +1395,15 @@ def test_prepare_dataloader_non_callable_transform(mock_feature_extractor, caplo
             prepare_dataloader(
                 data_dir="./data",
                 batch_size=4,
-                feature_extractor=mock_feature_extractor,
+                feature_extractor="not_callable",  # Passing non-callable
                 mode="train"
             )
 
-        assert "feature_extractor must be callable" in str(exc_info.value), \
+        assert "feature_extractor must be callable." in str(exc_info.value), \
             "Expected TypeError for non-callable feature_extractor"
 
         # Optionally, check that an error was logged
-        assert "Error preparing dataloader: feature_extractor must be callable" in caplog.text, \
+        assert "Error preparing dataloader: feature_extractor must be callable." in caplog.text, \
             "Error log for non-callable feature_extractor is missing."
 
 # 18. Edge Case Tests: Missing 'logits' or 'labels' in Outputs or Targets

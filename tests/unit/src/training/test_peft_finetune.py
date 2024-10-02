@@ -1444,17 +1444,24 @@ def test_fine_tune_peft_model_missing_fields(
 
 # 19. Edge Case Tests: Non-Tensor Inputs in Targets
 
-def test_fine_tune_peft_model_non_tensor_targets(default_config, mock_peft_model, mock_dataloader_train, mock_dataloader_val, mock_optimizer, mock_scheduler):
+def test_fine_tune_peft_model_non_tensor_targets(
+    default_config,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
+    mock_optimizer,
+    mock_scheduler
+):
     """Test fine_tune_peft_model with non-tensor targets to ensure proper error handling."""
     # Mock dataloader to return non-tensor targets
     mock_dataloader_train.__iter__.return_value = [
         ([torch.randn(4, 3, 224, 224)], [{"labels": [1, 2], "boxes": [[10, 10, 50, 50]]}])
     ]
-    
+
     with patch("src.training.peft_finetune.autocast"), \
          patch("src.training.peft_finetune.GradScaler"):
-        
-        with pytest.raises(AttributeError):
+
+        with pytest.raises(TypeError) as exc_info:
             fine_tune_peft_model(
                 model=mock_peft_model,
                 train_dataloader=mock_dataloader_train,
@@ -1464,6 +1471,10 @@ def test_fine_tune_peft_model_non_tensor_targets(default_config, mock_peft_model
                 config=default_config,
                 device="cpu"
             )
+
+    # Assert that the TypeError was raised with the correct message
+    assert "'labels' in target must be a torch.Tensor" in str(exc_info.value), \
+        "Expected TypeError for non-tensor 'labels' in target"
 
 # 20. Edge Case Tests: Extremely Large Batch Sizes
 

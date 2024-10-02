@@ -346,7 +346,7 @@ def test_fine_tune_peft_model_training_loop(
     mock_peft_model.state_dict.return_value = {}
 
     # Mock external dependencies: autocast, GradScaler, and torch.save
-    with patch("src.training.peft_finetune.autocast"), \
+    with patch("src.training.peft_finetune.autocast") as mock_autocast, \
          patch("src.training.peft_finetune.GradScaler") as mock_grad_scaler, \
          patch("torch.save") as mock_torch_save:
 
@@ -369,8 +369,9 @@ def test_fine_tune_peft_model_training_loop(
 
     # Assertions to verify that optimizer.zero_grad() was called once per batch per epoch
     expected_zero_grad_calls = default_config['training']['num_epochs'] * len(mock_dataloader_train)
-    assert mock_optimizer.zero_grad.call_count == expected_zero_grad_calls, \
-        f"Optimizer.zero_grad() should be called {expected_zero_grad_calls} times, but was called {mock_optimizer.zero_grad.call_count} times."
+    actual_zero_grad_calls = mock_optimizer.zero_grad.call_count
+    assert actual_zero_grad_calls == expected_zero_grad_calls, \
+        f"Optimizer.zero_grad() should be called {expected_zero_grad_calls} times, but was called {actual_zero_grad_calls} times."
 
 def test_fine_tune_peft_model_mixed_precision(
     default_config,

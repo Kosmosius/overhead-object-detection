@@ -789,6 +789,9 @@ def test_fine_tune_peft_model_no_validation(
     """
     Test fine_tune_peft_model when validation dataloader is None.
     """
+    # Ensure that validation is skipped by passing val_dataloader=None
+    config = default_config.copy()
+
     # Mock model's methods
     mock_peft_model.to = MagicMock(return_value=mock_peft_model)
     mock_peft_model.train = MagicMock()
@@ -805,10 +808,10 @@ def test_fine_tune_peft_model_no_validation(
         mock_autocast.return_value = MagicMock()
 
         # Configure the mocked GradScaler instance if mixed_precision is enabled
-        if default_config['training'].get('mixed_precision', True):
+        if config['training'].get('mixed_precision', True):
             mock_grad_scaler_instance = MagicMock()
-            mock_grad_scaler.return_value = mock_grad_scaler_instance
             mock_grad_scaler_instance.scale.return_value = mock_peft_model.forward.return_value.loss
+            mock_grad_scaler.return_value = mock_grad_scaler_instance
         else:
             mock_grad_scaler.return_value = None
 
@@ -820,7 +823,7 @@ def test_fine_tune_peft_model_no_validation(
                 val_dataloader=None,  # No validation
                 optimizer=mock_optimizer,
                 scheduler=mock_scheduler,
-                config=default_config,
+                config=config,
                 device="cpu"
             )
 
@@ -828,7 +831,7 @@ def test_fine_tune_peft_model_no_validation(
     mock_peft_model.train.assert_called()
 
     # Calculate expected zero_grad calls
-    expected_zero_grad_calls = default_config['training']['num_epochs'] * len(mock_dataloader_train)
+    expected_zero_grad_calls = config['training']['num_epochs'] * len(mock_dataloader_train)
     actual_zero_grad_calls = mock_optimizer.zero_grad.call_count
     assert actual_zero_grad_calls == expected_zero_grad_calls, \
         f"Optimizer.zero_grad() call count mismatch. Expected: {expected_zero_grad_calls}, Actual: {actual_zero_grad_calls}"

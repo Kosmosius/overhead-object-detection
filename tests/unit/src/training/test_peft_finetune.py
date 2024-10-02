@@ -1494,7 +1494,7 @@ def test_fine_tune_peft_model_extremely_large_batch(
     # Mock dataloader to simulate large batch
     large_batch = (
         torch.randn(10000, 3, 224, 224),  # Pixel values as tensor
-        {"labels": torch.randint(0, 91, (10000,)), "boxes": torch.randn(10000, 4)}
+        [{"labels": torch.randint(0, 91, (10000,)), "boxes": torch.randn(10000, 4)}]
     )
     mock_dataloader_train.__iter__.return_value = iter([large_batch])
     mock_dataloader_train.__len__.return_value = 1
@@ -1521,16 +1521,15 @@ def test_fine_tune_peft_model_extremely_large_batch(
          patch("torch.save"):
 
         # Execute the fine_tune_peft_model function within the mocked context
-        with caplog.at_level(logging.INFO):
-            fine_tune_peft_model(
-                model=mock_peft_model,
-                train_dataloader=mock_dataloader_train,
-                val_dataloader=mock_dataloader_val,
-                optimizer=mock_optimizer,
-                scheduler=mock_scheduler,
-                config=config,
-                device="cpu"
-            )
+        fine_tune_peft_model(
+            model=mock_peft_model,
+            train_dataloader=mock_dataloader_train,
+            val_dataloader=mock_dataloader_val,
+            optimizer=mock_optimizer,
+            scheduler=mock_scheduler,
+            config=config,
+            device="cpu"
+        )
 
     # Assertions to verify that training and validation methods were called
     mock_peft_model.train.assert_called()
@@ -1544,4 +1543,8 @@ def test_fine_tune_peft_model_extremely_large_batch(
 
     # Assertions to verify that loss.backward() was called
     mock_output.loss.backward.assert_called_once()
+
+    # Assertions to verify logging messages
+    assert "Training Loss: 1.0" in caplog.text, "Training loss log missing."
+    assert "Validation Loss: 1.0" in caplog.text, "Validation loss log missing."
 

@@ -1229,23 +1229,23 @@ def test_get_optimizer_negative_learning_rate(
     # Modify the optimizer configuration to have a negative learning rate
     config = default_config.copy()
     config['optimizer']['learning_rate'] = -1e-4  # Negative learning rate
-    
+
     # Mock model's forward pass to return a mock output with 'loss' attribute
     mock_output = MagicMock()
     mock_output.loss = torch.tensor(1.0, requires_grad=True)
     mock_output.loss.backward = MagicMock()  # Mock the backward method
     mock_peft_model.forward.return_value = mock_output  # Correctly mock forward
-    
+
     # Ensure state_dict returns a serializable object to prevent PicklingError
     mock_peft_model.state_dict.return_value = {}
-    
+
     # Mock external dependencies: get_optimizer_and_scheduler and torch.save
     with patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler, \
          patch("torch.save") as mock_torch_save:
-        
+
         # Configure the mocked get_optimizer_and_scheduler to raise ValueError for invalid learning rate
         mock_get_optimizer_and_scheduler.side_effect = ValueError("Invalid learning rate")
-        
+
         # Execute fine_tune_peft_model and expect a ValueError
         with pytest.raises(ValueError) as exc_info:
             fine_tune_peft_model(
@@ -1257,12 +1257,12 @@ def test_get_optimizer_negative_learning_rate(
                 config=config,
                 device="cpu"
             )
-        
-        # Assert that the ValueError was raised with the correct message
-        assert "Invalid learning rate" in str(exc_info.value), "Did not raise ValueError for negative learning rate."
-        
-        # Assert that torch.save was not called due to the exception
-        mock_torch_save.assert_not_called()
+
+    # Assert that the ValueError was raised with the correct message
+    assert "Invalid learning rate" in str(exc_info.value), "Did not raise ValueError for negative learning rate."
+
+    # Assert that torch.save was not called due to the exception
+    mock_torch_save.assert_not_called()
 
 # 14. Edge Case Tests: Missing Configuration Fields
 

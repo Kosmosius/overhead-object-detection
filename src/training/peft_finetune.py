@@ -89,8 +89,8 @@ def _train_one_epoch(model, dataloader, optimizer, scaler, scheduler, device, mi
     for batch in tqdm(dataloader, desc="Training"):
         optimizer.zero_grad()
         pixel_values, targets = batch
-        pixel_values = prepare_inputs(pixel_values, device)
-        targets = prepare_targets(targets, device)
+        pixel_values = _prepare_inputs(pixel_values, device)
+        targets = _prepare_targets(targets, device)
 
         with autocast(enabled=mixed_precision):
             outputs = model(pixel_values, targets)
@@ -115,8 +115,8 @@ def _validate_one_epoch(model, dataloader, device, mixed_precision):
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Validation"):
             pixel_values, targets = batch
-            pixel_values = prepare_inputs(pixel_values, device)
-            targets = prepare_targets(targets, device)
+            pixel_values = _prepare_inputs(pixel_values, device)
+            targets = _prepare_targets(targets, device)
 
             with autocast(enabled=mixed_precision):
                 outputs = model(pixel_values, targets)

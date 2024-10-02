@@ -540,95 +540,117 @@ def test_fine_tune_peft_model_empty_dataloader(
 # 4. Tests for main
 
 def test_main_success(
-    mock_model_instance,
-    mock_dataloader,
+    mock_peft_model,
+    mock_dataloader_train,
+    mock_dataloader_val,
     mock_optimizer,
     mock_scheduler,
-    default_config,
-    mock_evaluator,
+    mock_feature_extractor,
+    mock_peft_config,
+    mock_config_parser,
     caplog
 ):
     """
     Test successful execution of the main function.
     """
-    config_path = "configs/train_config.yaml"
+    config_path = "configs/peft_config.yaml"
 
     with patch("src.training.peft_finetune.ConfigParser") as mock_config_parser, \
          patch("src.training.peft_finetune.setup_logging") as mock_setup_logging, \
-         patch("src.training.peft_finetune.ModelFactory.create_model", return_value=mock_model_instance) as mock_create_model, \
-         patch("src.training.peft_finetune.get_dataloader", return_value=mock_dataloader) as mock_get_dataloader, \
-         patch("src.training.peft_finetune.get_optimizer_and_scheduler", return_value=(mock_optimizer, mock_scheduler)) as mock_get_optimizer_scheduler, \
-         patch("src.training.peft_finetune.train_model") as mock_train_model, \
-         patch("src.training.peft_finetune.Evaluator", return_value=mock_evaluator):
+         patch("src.training.peft_finetune.DetrFeatureExtractor.from_pretrained") as mock_from_pretrained, \
+         patch("src.training.peft_finetune.setup_peft_model") as mock_setup_peft_model, \
+         patch("src.training.peft_finetune.prepare_dataloader") as mock_prepare_dataloader, \
+         patch("src.training.peft_finetune.get_optimizer_and_scheduler") as mock_get_optimizer_and_scheduler, \
+         patch("src.training.peft_finetune.PeftConfig.from_pretrained") as mock_peft_config_from_pretrained, \
+         patch("src.training.peft_finetune.fine_tune_peft_model") as mock_fine_tune_peft_model, \
+         patch("torch.save") as mock_torch_save:
 
-        # Mock ConfigParser to return default_config
-        mock_config_parser_instance = MagicMock()
+        # Configure the mocked ConfigParser to return default_config
+        mock_config_parser_instance = mock_config_parser.return_value
         mock_config_parser_instance.config = default_config
-        mock_config_parser.return_value = mock_config_parser_instance
 
-        # Mock feature extractor
-        with patch("src.training.peft_finetune.DetrFeatureExtractor.from_pretrained") as mock_feature_extractor:
-            mock_feature_extractor.return_value = MagicMock()
+        # Mock the feature extractor's from_pretrained method
+        mock_from_pretrained.return_value = mock_feature_extractor
 
-            # Mock torch.save for final model saving
-            with patch("src.training.peft_finetune.os.path.join", side_effect=lambda *args: "/".join(args)), \
-                 patch("src.training.peft_finetune.ModelFactory.create_model", return_value=mock_model_instance), \
-                 patch("src.training.peft_finetune.ModelFactory") as mock_model_factory:
+        # Mock PeftConfig.from_pretrained to return a mocked PeftConfig
+        mock_peft_config_from_pretrained.return_value = mock_peft_config
 
-                # Mock model_instance.save
-                mock_model_instance.save = MagicMock()
+        # Mock setup_peft_model to return a mocked PeftModel
+        mock_setup_peft_model.return_value = mock_peft_model
 
-                # Execute main function
-                main(config_path)
+        # Mock prepare_dataloader to return training and validation DataLoaders
+        mock_prepare_dataloader.side_effect = [mock_dataloader_train, mock_dataloader_val]
 
-                # Assertions
-                mock_config_parser.assert_called_once_with(config_path)
-                mock_setup_logging.assert_called_once()
-                mock_create_model.assert_called_once_with(
-                    model_type=default_config['model']['model_type'],
-                    model_name=default_config['model']['model_name'],
-                    num_labels=default_config['model']['num_classes']
-                )
-                mock_get_dataloader.assert_any_call(
-                    data_dir=default_config['data']['data_dir'],
-                    batch_size=default_config['training']['batch_size'],
-                    mode="train",
-                    feature_extractor=mock_feature_extractor.return_value,
-                    num_workers=default_config['training'].get('num_workers', 4),
-                    pin_memory=default_config['training'].get('pin_memory', True)
-                )
-                mock_get_dataloader.assert_any_call(
-                    data_dir=default_config['data']['data_dir'],
-                    batch_size=default_config['training']['batch_size'],
-                    mode="val",
-                    feature_extractor=mock_feature_extractor.return_value,
-                    num_workers=default_config['training'].get('num_workers', 4),
-                    pin_memory=default_config['training'].get('pin_memory', True)
-                )
-                mock_get_optimizer_scheduler.assert_called_once_with(
-                    model=mock_model_instance.model,
-                    config=default_config['optimizer'],
-                    num_training_steps=default_config['training']['num_epochs'] * len(mock_dataloader)
-                )
-                mock_train_model.assert_called_once_with(
-                    model_instance=mock_model_instance,
-                    train_dataloader=mock_dataloader,
-                    val_dataloader=mock_dataloader,
-                    optimizer=mock_optimizer,
-                    scheduler=mock_scheduler,
-                    config=default_config,
-                    device=torch.device(default_config['training']['device']),
-                    checkpoint_dir=default_config['training']['checkpoint_dir']
-                )
-                mock_model_instance.save.assert_called_once_with(
-                    os.path.join(default_config['training']['output_dir'], 'final_model'),
-                    metadata=mock_model_instance.state_dict()
-                )
+        # Mock get_optimizer_and_scheduler to return mocked optimizer and scheduler
+        mock_get_optimizer_and_scheduler.return_value = (mock_optimizer, mock_scheduler)
 
-                # Check logging
-                assert "Feature extractor 'facebook/detr-resnet-50' loaded successfully." in caplog.text, "Feature extractor loading log missing."
-                assert f"Model '{default_config['model']['model_name']}' initialized and moved to device '{default_config['training']['device']}'." in caplog.text, "Model initialization log missing."
-                assert "Training completed." in caplog.text, "Training completion log missing."
+        # Execute the main function within the mocked context
+        with caplog.at_level(logging.INFO):
+            main(config_path)
+
+        # --- Assertions ---
+
+        # Verify that ConfigParser was instantiated with the correct config_path
+        mock_config_parser.assert_called_once_with(config_path)
+
+        # Verify that setup_logging was called to configure logging
+        mock_setup_logging.assert_called_once()
+
+        # Verify that DetrFeatureExtractor.from_pretrained was called with the correct model name
+        mock_from_pretrained.assert_called_once_with(default_config['model']['model_name'])
+
+        # Verify that setup_peft_model was called with correct arguments
+        mock_setup_peft_model.assert_called_once_with(
+            model_name=default_config['model']['model_name'],
+            num_classes=default_config['model']['num_classes'],
+            peft_config=mock_peft_config
+        )
+
+        # Verify that prepare_dataloader was called for both train and validation
+        mock_prepare_dataloader.assert_any_call(
+            data_dir=default_config['data']['data_dir'],
+            batch_size=default_config['training']['batch_size'],
+            mode="train",
+            feature_extractor=mock_feature_extractor,
+            num_workers=default_config['training'].get('num_workers', 4),
+            pin_memory=default_config['training'].get('pin_memory', True)
+        )
+        mock_prepare_dataloader.assert_any_call(
+            data_dir=default_config['data']['data_dir'],
+            batch_size=default_config['training']['batch_size'],
+            mode="val",
+            feature_extractor=mock_feature_extractor,
+            num_workers=default_config['training'].get('num_workers', 4),
+            pin_memory=default_config['training'].get('pin_memory', True)
+        )
+
+        # Verify that get_optimizer_and_scheduler was called with correct arguments
+        mock_get_optimizer_and_scheduler.assert_called_once_with(
+            model=mock_peft_model,
+            config=default_config['optimizer'],
+            num_training_steps=default_config['training']['num_epochs'] * len(mock_dataloader_train)
+        )
+
+        # Verify that fine_tune_peft_model was called with correct arguments
+        mock_fine_tune_peft_model.assert_called_once_with(
+            model=mock_peft_model,
+            train_dataloader=mock_dataloader_train,
+            val_dataloader=mock_dataloader_val,
+            optimizer=mock_optimizer,
+            scheduler=mock_scheduler,
+            config=default_config,
+            device=default_config['training']['device']
+        )
+
+        # Verify that torch.save was called once to save the final model
+        final_model_path = os.path.join(default_config['training'].get('output_dir', './output'), 'final_model.pt')
+        mock_torch_save.assert_called_once_with(mock_peft_model.state_dict(), final_model_path)
+
+        # Check logging messages
+        assert "Feature extractor 'facebook/detr-resnet-50' loaded successfully." in caplog.text, "Feature extractor loading log missing."
+        assert f"Model '{default_config['model']['model_name']}' initialized and moved to device '{default_config['training']['device']}'." in caplog.text, "Model initialization log missing."
+        assert "Training completed." in caplog.text, "Training completion log missing."
+        assert f"Final model saved at {final_model_path}" in caplog.text, "Final model saving log missing."
 
 def test_main_error_in_config_parser(caplog):
     """Test that main raises an error when ConfigParser fails."""

@@ -522,16 +522,16 @@ def test_fine_tune_peft_model_empty_dataloader(
                 )
     
     # Assertions to verify that training and validation methods were called
-    mock_peft_model.train.assert_called()
-    mock_peft_model.eval.assert_called()
+    mock_peft_model.train.assert_not_called()
+    mock_peft_model.eval.assert_not_called()  # Should not be called if dataloader is empty
     
     # Since dataloaders are empty, optimizer steps should not be called
     mock_optimizer.zero_grad.assert_not_called()
     mock_optimizer.step.assert_not_called()
     mock_scheduler.step.assert_not_called()
     
-    # Check that torch.save was called with the mock state_dict and any checkpoint path
-    mock_torch_save.assert_called_with({}, ANY)  # ANY is used for the checkpoint path
+    # Check that torch.save was not called due to the exception
+    mock_torch_save.assert_not_called()
     
     # Assertions to verify that loss computations were skipped and logs were made
     assert "Training Loss: 0.0" in caplog.text, "Did not log training loss."

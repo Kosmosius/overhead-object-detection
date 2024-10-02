@@ -104,7 +104,7 @@ def _train_one_epoch(model, dataloader, optimizer, scaler, device, mixed_precisi
         pixel_values = _prepare_inputs(pixel_values, device)
         targets = _prepare_targets(targets, device)
 
-        with autocast(device_type=device if device != 'cpu' else 'cpu', enabled=mixed_precision):
+        with amp.autocast(device_type=device if device != 'cpu' else 'cpu', enabled=mixed_precision):
             outputs = model(pixel_values, labels=targets)
             loss = outputs.loss
 

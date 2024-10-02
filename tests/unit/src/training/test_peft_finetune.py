@@ -1423,7 +1423,7 @@ def test_fine_tune_peft_model_missing_fields(
 
         # Configure the mocked dataloader to return targets missing 'labels' and 'boxes'
         mock_dataloader_train.__iter__.return_value = [
-            ([torch.randn(4, 3, 224, 224)], {})  # Missing 'labels' and 'boxes'
+            ([torch.randn(4, 3, 224, 224)], [{}])  # Each target dict is empty
         ]
         mock_dataloader_train.__len__.return_value = 1
 
@@ -1439,8 +1439,8 @@ def test_fine_tune_peft_model_missing_fields(
                 device="cpu"
             )
 
-        assert "Missing 'labels' in target" in str(exc_info.value), \
-            "Expected KeyError for missing 'labels' in target"
+    # Assert that the KeyError was raised with the correct message
+    assert "Missing 'labels' in target" in str(exc_info.value), "Expected KeyError for missing 'labels' in target"
 
 # 19. Edge Case Tests: Non-Tensor Inputs in Targets
 

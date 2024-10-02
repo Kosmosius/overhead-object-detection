@@ -295,10 +295,11 @@ def main(config_path: str) -> None:
     )
 
     # Set up optimizer and scheduler
+    num_training_steps = training_config['num_epochs'] * len(train_loader)  # Correct calculation
     optimizer, scheduler = get_optimizer_and_scheduler(
         model=model,
         config=optimizer_config,
-        num_training_steps=training_config['num_epochs']
+        num_training_steps=num_training_steps
     )
 
     # Fine-tune the model

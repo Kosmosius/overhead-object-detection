@@ -5,10 +5,6 @@ from torch.optim import SGD, Adam, RMSprop, AdamW
 from transformers import get_scheduler, SchedulerType
 from typing import Optional, List, Dict, Any, Tuple
 from torch.optim.lr_scheduler import _LRScheduler
-import logging
-
-# Set up logging
-logger = logging.getLogger(__name__)
 
 # Define the mapping from SchedulerType to scheduler functions or string identifiers
 TYPE_TO_SCHEDULER_FUNCTION = {
@@ -122,15 +118,6 @@ def configure_optimizer(model: torch.nn.Module, config: Dict[str, Any]) -> torch
     Returns:
         torch.optim.Optimizer: Configured optimizer based on the config file.
     """
-    optimizer_type = config.get('optimizer_type', 'AdamW')
-    learning_rate = config.get('learning_rate', 1e-4)
-
-    if learning_rate <= 0:
-        raise ValueError("Learning rate must be a positive value.")
-
-    if optimizer_type == 'AdamW':
-        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, **config.get('optimizer_kwargs', {}))
-    
     return get_optimizer(
         model=model,
         optimizer_type=config.get("optimizer_type", "adamw"),
@@ -218,12 +205,6 @@ def get_optimizer_and_scheduler(
         Tuple[torch.optim.Optimizer, Optional[_LRScheduler]]: 
             Optimizer and scheduler objects.
     """
-    try:
-        parameter_groups = config['parameter_groups']
-    except KeyError:
-        logger.error("'params' key is missing in parameter_groups")
-        raise KeyError("'params' key is missing in parameter_groups")
-    
     optimizer = configure_optimizer(model, config)
     scheduler = configure_scheduler(optimizer, num_training_steps, config)
 

@@ -45,6 +45,7 @@ def mock_peft_model():
     peft_model.eval = MagicMock()
     peft_model.forward = MagicMock()
     peft_model.state_dict = MagicMock(return_value={})
+    peft_model.save = MagicMock()
     return peft_model
 
 @pytest.fixture
@@ -1105,14 +1106,18 @@ def test_main_integration(
         mock_prepare_dataloader.assert_any_call(
             data_dir=default_config['data']['data_dir'],
             batch_size=default_config['training']['batch_size'],
+            mode="train",
             feature_extractor=mock_feature_extractor,
-            mode="train"
+            num_workers=default_config['training'].get('num_workers', 4),
+            pin_memory=default_config['training'].get('pin_memory', True)
         )
         mock_prepare_dataloader.assert_any_call(
             data_dir=default_config['data']['data_dir'],
             batch_size=default_config['training']['batch_size'],
+            mode="val",
             feature_extractor=mock_feature_extractor,
-            mode="val"
+            num_workers=default_config['training'].get('num_workers', 4),
+            pin_memory=default_config['training'].get('pin_memory', True)
         )
 
         # Verify that get_optimizer_and_scheduler was called with correct arguments
@@ -1130,7 +1135,8 @@ def test_main_integration(
             optimizer=mock_optimizer,
             scheduler=mock_scheduler,
             config=default_config,
-            device="cpu"
+            device=torch.device(default_config['training']['device']),
+            checkpoint_dir=default_config['training']['checkpoint_dir']
         )
 
         # Verify that the final model was saved

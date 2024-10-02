@@ -8,8 +8,7 @@ from tqdm import tqdm
 from datasets import load_dataset
 from torch.cuda.amp import autocast, GradScaler
 from torchvision.datasets import CocoDetection
-from transformers import AdamW, DetrFeatureExtractor, get_scheduler, DetrForObjectDetection
-from src.models.model_factory import ModelFactory
+from transformers import DetrFeatureExtractor, DetrForObjectDetection
 from src.utils.config_parser import ConfigParser
 from src.utils.logging_utils import setup_logging
 from src.training.optimizers import get_optimizer_and_scheduler
@@ -40,7 +39,14 @@ def setup_peft_model(model_name: str, num_classes: int, peft_config: PeftConfig)
         logger.error(error_message)
         raise Exception(error_message) from e
 
-def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFeatureExtractor, mode="train") -> torch.utils.data.DataLoader:
+def prepare_dataloader(
+    data_dir: str,
+    batch_size: int,
+    feature_extractor: DetrFeatureExtractor,
+    mode="train",
+    num_workers: int = 4,
+    pin_memory: bool = True
+) -> torch.utils.data.DataLoader:
     """
     Prepare a DataLoader for a dataset (supports both COCO-style and HuggingFace datasets).
 
@@ -49,6 +55,8 @@ def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFe
         batch_size (int): Batch size for loading data.
         feature_extractor (DetrFeatureExtractor): Feature extractor for preprocessing images.
         mode (str): Either "train" or "val" for training or validation mode.
+        num_workers (int): Number of subprocesses to use for data loading.
+        pin_memory (bool): Whether to pin memory.
 
     Returns:
         torch.utils.data.DataLoader: Prepared DataLoader for the specified dataset.
@@ -73,7 +81,9 @@ def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFe
             dataset,
             batch_size=batch_size,
             shuffle=True if mode == "train" else False,
-            collate_fn=lambda batch: tuple(zip(*batch))
+            collate_fn=lambda batch: tuple(zip(*batch)),
+            num_workers=num_workers,
+            pin_memory=pin_memory
         )
 
         logger.info(f"Dataloader for mode '{mode}' prepared successfully with batch size {batch_size}.")
@@ -83,7 +93,7 @@ def prepare_dataloader(data_dir: str, batch_size: int, feature_extractor: DetrFe
         logger.error(f"Error preparing dataloader: {e}")
         raise
 
-def _train_one_epoch(model, dataloader, optimizer, scaler, scheduler, device, mixed_precision):
+def _train_one_epoch(model, dataloader, optimizer, scaler, device, mixed_precision):
     model.train()
     total_loss = 0.0
     for batch in tqdm(dataloader, desc="Training"):
@@ -92,8 +102,8 @@ def _train_one_epoch(model, dataloader, optimizer, scaler, scheduler, device, mi
         pixel_values = _prepare_inputs(pixel_values, device)
         targets = _prepare_targets(targets, device)
 
-        with autocast(enabled=mixed_precision):
-            outputs = model(pixel_values, targets)
+        with autocast(device_type=device if device != 'cpu' else 'cpu', enabled=mixed_precision):
+            outputs = model(pixel_values, labels=targets)
             loss = outputs.loss
 
         if scaler:
@@ -104,7 +114,6 @@ def _train_one_epoch(model, dataloader, optimizer, scaler, scheduler, device, mi
             loss.backward()
             optimizer.step()
 
-        scheduler.step()
         total_loss += loss.item()
     avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
     return avg_loss
@@ -118,8 +127,8 @@ def _validate_one_epoch(model, dataloader, device, mixed_precision):
             pixel_values = _prepare_inputs(pixel_values, device)
             targets = _prepare_targets(targets, device)
 
-            with autocast(enabled=mixed_precision):
-                outputs = model(pixel_values, targets)
+            with autocast(device_type=device if device != 'cpu' else 'cpu', enabled=mixed_precision):
+                outputs = model(pixel_values, labels=targets)
                 loss = outputs.loss
 
             total_loss += loss.item()
@@ -136,18 +145,21 @@ def _prepare_inputs(pixel_values, device):
     return pixel_values
 
 def _prepare_targets(targets, device):
-    if isinstance(targets, dict):
-        required_fields = ['labels', 'boxes']
-        for field in required_fields:
-            if field not in targets:
-                raise KeyError(f"Missing '{field}' in target")
-            if not isinstance(targets[field], torch.Tensor):
-                raise TypeError(f"'{field}' in target must be a torch.Tensor")
-        targets = {k: v.to(device) for k, v in targets.items()}
-    elif isinstance(targets, list):
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+    if isinstance(targets, list):
+        prepared_targets = []
+        for t in targets:
+            if not isinstance(t, dict):
+                raise TypeError("Each target must be a dict")
+            required_fields = ['labels', 'boxes']
+            for field in required_fields:
+                if field not in t:
+                    raise KeyError(f"Missing '{field}' in target")
+                if not isinstance(t[field], torch.Tensor):
+                    raise TypeError(f"'{field}' in target must be a torch.Tensor")
+            prepared_targets.append({k: v.to(device) for k, v in t.items()})
+        return prepared_targets
     else:
-        raise TypeError("target must be a dict or list of dicts")
+        raise TypeError("targets must be a list of dicts")
     return targets
 
 def fine_tune_peft_model(
@@ -183,12 +195,11 @@ def fine_tune_peft_model(
         logger.info(f"Starting Epoch {epoch + 1}/{num_epochs}")
 
         # Training
-        train_loss = _train_one_epoch(  # Corrected function call
+        train_loss = _train_one_epoch(
             model=model,
             dataloader=train_dataloader,
             optimizer=optimizer,
             scaler=scaler,
-            scheduler=scheduler,
             device=device,
             mixed_precision=mixed_precision
         )
@@ -196,13 +207,16 @@ def fine_tune_peft_model(
 
         # Validation
         if val_dataloader:
-            val_loss = _validate_one_epoch(  # Corrected function call
+            val_loss = _validate_one_epoch(
                 model=model,
                 dataloader=val_dataloader,
                 device=device,
                 mixed_precision=mixed_precision
             )
             logger.info(f"Epoch {epoch + 1}, Validation Loss: {val_loss}")
+
+        # Scheduler step
+        scheduler.step()
 
         # Save checkpoint
         checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch + 1}.pt")
@@ -246,6 +260,7 @@ def main(config_path: str) -> None:
 
     # Prepare feature extractor
     feature_extractor = DetrFeatureExtractor.from_pretrained(model_config['model_name'])
+    logger.info(f"Feature extractor '{model_config['model_name']}' loaded successfully.")
 
     # Prepare PEFT model
     peft_config = PeftConfig.from_pretrained(model_config['peft_model_path'])
@@ -254,26 +269,32 @@ def main(config_path: str) -> None:
         num_classes=model_config['num_classes'],
         peft_config=peft_config
     )
+    device = training_config.get('device', 'cpu')
+    logger.info(f"Model '{model_config['model_name']}' initialized and moved to device '{device}'.")
 
     # Prepare dataloaders
     train_loader = prepare_dataloader(
         data_dir=data_config['data_dir'],
         batch_size=training_config['batch_size'],
         feature_extractor=feature_extractor,
-        mode="train"
+        mode="train",
+        num_workers=training_config.get('num_workers', 4),
+        pin_memory=training_config.get('pin_memory', True)
     )
     val_loader = prepare_dataloader(
         data_dir=data_config['data_dir'],
         batch_size=training_config['batch_size'],
         feature_extractor=feature_extractor,
-        mode="val"
+        mode="val",
+        num_workers=training_config.get('num_workers', 4),
+        pin_memory=training_config.get('pin_memory', True)
     )
 
     # Set up optimizer and scheduler
     optimizer, scheduler = get_optimizer_and_scheduler(
         model=model,
         config=optimizer_config,
-        num_training_steps=training_config['num_epochs'] * len(train_loader)
+        num_training_steps=training_config['num_epochs']
     )
 
     # Fine-tune the model
@@ -284,11 +305,14 @@ def main(config_path: str) -> None:
         optimizer=optimizer,
         scheduler=scheduler,
         config=config,
-        device=training_config.get('device', 'cpu')
+        device=device
     )
+    logger.info("Training completed.")
 
     # Save the final model
-    final_model_path = os.path.join(training_config.get('output_dir', './output'), 'final_model.pt')
+    output_dir = training_config.get('output_dir', './output')
+    os.makedirs(output_dir, exist_ok=True)
+    final_model_path = os.path.join(output_dir, 'final_model.pt')
     torch.save(model.state_dict(), final_model_path)
     logger.info(f"Final model saved at {final_model_path}")
 

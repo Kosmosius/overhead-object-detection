@@ -1,1 +1,114 @@
+# configs/models/detr.yaml
+
+# DETR (DEtection TRansformer) Configuration
+
+# Whether to use the timm library for the backbone. If False, uses AutoBackbone API.
+use_timm_backbone: true
+
+# Configuration for the backbone model.
+# If use_timm_backbone is false, specify the backbone configuration here.
+# Example for ResNet-50:
+# backbone_config:
+#   name: "resnet50"
+#   pretrained: true
+backbone_config: null
+
+# Number of input channels. Typically 3 for RGB images.
+num_channels: 3
+
+# Number of object queries. Determines the maximum number of objects DETR can detect.
+num_queries: 100
+
+# Dimension of the Transformer layers.
+d_model: 256
+
+# Number of layers in the Transformer encoder.
+encoder_layers: 6
+
+# Number of layers in the Transformer decoder.
+decoder_layers: 6
+
+# Number of attention heads in each Transformer encoder layer.
+encoder_attention_heads: 8
+
+# Number of attention heads in each Transformer decoder layer.
+decoder_attention_heads: 8
+
+# Dimension of the feed-forward network in the Transformer decoder.
+decoder_ffn_dim: 2048
+
+# Dimension of the feed-forward network in the Transformer encoder.
+encoder_ffn_dim: 2048
+
+# Activation function to use in the Transformer layers. Options: "relu", "gelu", "silu", "gelu_new"
+activation_function: "relu"
+
+# Dropout probability for all fully connected layers in embeddings, encoder, and decoder.
+dropout: 0.1
+
+# Dropout ratio for the attention probabilities.
+attention_dropout: 0.0
+
+# Dropout ratio for activations inside the feed-forward layers.
+activation_dropout: 0.0
+
+# Standard deviation for initializing weight matrices with a truncated normal distribution.
+init_std: 0.02
+
+# Scaling factor for Xavier initialization gain in the HM Attention map module.
+init_xavier_std: 1.0
+
+# LayerDrop probability for the Transformer encoder layers.
+encoder_layerdrop: 0.0
+
+# LayerDrop probability for the Transformer decoder layers.
+decoder_layerdrop: 0.0
+
+# Whether to use auxiliary decoding losses (loss at each decoder layer).
+# Helps the model output the correct number of objects during training.
+auxiliary_loss: false
+
+# Type of position embeddings to use on top of the image features.
+# Options: "sine" or "learned"
+position_embedding_type: "sine"
+
+# Name of the backbone model to use. If use_pretrained_backbone is true,
+# loads pretrained weights from the timm or transformers library.
+# Example options: "resnet50", "resnet101", "tf_mobilenetv3_small_075"
+backbone: "resnet50"
+
+# Whether to use pretrained weights for the backbone.
+use_pretrained_backbone: true
+
+# Additional keyword arguments to pass to the backbone when loading from a checkpoint.
+# Example: {'out_indices': (0, 1, 2, 3)}
+backbone_kwargs: null
+
+# Whether to replace stride with dilation in the last convolutional block (DC5).
+# Only supported when use_timm_backbone is true.
+dilation: false
+
+# Relative weight of the classification error in the Hungarian matching cost.
+class_cost: 1.0
+
+# Relative weight of the L1 error of the bounding box coordinates in the Hungarian matching cost.
+bbox_cost: 5.0
+
+# Relative weight of the generalized IoU loss of the bounding box in the Hungarian matching cost.
+giou_cost: 2.0
+
+# Relative weight of the Focal loss in the panoptic segmentation loss.
+mask_loss_coefficient: 1.0
+
+# Relative weight of the DICE/F-1 loss in the panoptic segmentation loss.
+dice_loss_coefficient: 1.0
+
+# Relative weight of the L1 bounding box loss in the object detection loss.
+bbox_loss_coefficient: 5.0
+
+# Relative weight of the generalized IoU loss in the object detection loss.
+giou_loss_coefficient: 2.0
+
+# Relative classification weight of the 'no-object' class in the object detection loss.
+eos_coefficient: 0.1
 

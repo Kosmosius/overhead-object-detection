@@ -1,0 +1,114 @@
+# configs/models/mask2former.yaml
+
+# Configuration file for Mask2Former model
+# This configuration is tailored for overhead object detection tasks.
+# It leverages the Swin Transformer backbone and integrates advanced settings
+# for optimal performance and efficiency.
+
+model:
+  type: Mask2FormerForUniversalSegmentation
+  config:
+    # Backbone Configuration
+    backbone_config:
+      type: SwinConfig
+      embed_dim: 128  # Embedding dimension for Swin Transformer
+      depths: [2, 2, 18, 2]  # Depths for each Swin stage
+      num_heads: [4, 8, 16, 32]  # Number of attention heads in each Swin stage
+      window_size: 12  # Window size for Swin Transformer
+      mlp_ratio: 4.0  # MLP ratio in Swin Transformer
+      qkv_bias: true  # Whether to add bias to qkv projections
+      drop_path_rate: 0.3  # Stochastic depth rate
+      ape: false  # Absolute position embedding
+      patch_norm: true  # Whether to use layer normalization after patch embedding
+      out_indices: [0, 1, 2, 3]  # Output feature indices
+
+    # Feature Configuration
+    feature_size: 256  # Features (channels) of the resulting feature maps
+    mask_feature_size: 256  # Masks’ features size
+    hidden_dim: 256  # Dimensionality of the encoder layers
+    encoder_feedforward_dim: 1024  # Feedforward network dimension in encoder
+    activation_function: relu  # Activation function in encoder
+    encoder_layers: 6  # Number of layers in the encoder
+    decoder_layers: 10  # Number of layers in the Transformer decoder
+    num_attention_heads: 8  # Number of attention heads per decoder layer
+    dropout: 0.1  # Dropout probability
+    dim_feedforward: 2048  # Feedforward network dimension in decoder
+    pre_norm: false  # Use pre-LayerNorm in Transformer decoder
+    enforce_input_projection: false  # Add input projection if False
+    common_stride: 4  # Stride for determining FPN levels
+    ignore_value: 255  # Category ID to ignore during training
+
+    # Query Configuration
+    num_queries: 100  # Number of queries for the decoder
+    no_object_weight: 0.1  # Weight for the null (no object) class
+    class_weight: 2.0  # Weight for the cross-entropy loss
+    mask_weight: 5.0  # Weight for the mask loss
+    dice_weight: 5.0  # Weight for the dice loss
+
+    # Sampling Configuration
+    train_num_points: 12544  # Number of points for sampling during loss calculation
+    oversample_ratio: 3.0  # Oversampling ratio for sampled points
+    importance_sample_ratio: 0.75  # Importance sampling ratio
+
+    # Initialization Configuration
+    init_std: 0.02  # Standard deviation for truncated normal initializer
+    init_xavier_std: 1.0  # Scaling factor for Xavier initialization
+
+    # Auxiliary Loss Configuration
+    use_auxiliary_loss: true  # Use auxiliary losses from decoder stages
+    output_auxiliary_logits: true  # Output auxiliary logits
+
+    # Feature Strides Configuration
+    feature_strides: [4, 8, 16, 32]  # Strides for feature maps from backbone
+
+    # Backbone Usage
+    backbone: "swin-base-patch4-window12-384"  # Backbone model name
+    use_pretrained_backbone: true  # Use pretrained weights for the backbone
+    use_timm_backbone: false  # Load backbone from transformers library
+    backbone_kwargs:
+      out_indices: [0, 1, 2, 3]  # Additional kwargs for backbone
+
+    # Adapter Configuration (Optional)
+    adapter:
+      type: "lora"  # Adapter type: 'lora' or 'qlora'
+      config:
+        r: 8  # Rank of LoRA
+        lora_alpha: 32  # Scaling factor
+        lora_dropout: 0.1  # Dropout probability for LoRA
+
+training:
+  optimizer:
+    type: AdamW
+    params:
+      lr: 1e-4  # Learning rate
+      weight_decay: 0.01  # Weight decay
+  scheduler:
+    type: StepLR
+    step_size: 10  # Step size for scheduler
+    gamma: 0.1  # Multiplicative factor of learning rate decay
+
+loss:
+  type: CrossEntropyLoss
+  parameters:
+    reduction: mean  # Reduction method
+
+data:
+  preprocess:
+    image_size: [1024, 1024]  # Resize images to this size
+    normalize:
+      mean: [0.485, 0.456, 0.406]  # ImageNet mean
+      std: [0.229, 0.224, 0.225]  # ImageNet std
+    rescale_factor: 0.00392156862745098  # Rescale factor (1/255)
+  augmentation:
+    horizontal_flip: true  # Apply horizontal flip
+    random_crop: true  # Apply random cropping
+    color_jitter: true  # Apply color jitter
+
+evaluation:
+  metrics:
+    - "mIoU"  # Mean Intersection over Union
+    - "PQ"  # Panoptic Quality
+    - "AP"  # Average Precision
+
+# Additional Configuration Parameters (if needed)
+# These can be extended based on specific project requirements

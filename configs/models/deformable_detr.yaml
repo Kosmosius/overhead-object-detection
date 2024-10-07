@@ -1,0 +1,107 @@
+# configs/models/deformable_detr.yaml
+
+# Deformable DETR Configuration File
+# This file defines the hyperparameters and settings for the Deformable DETR model.
+# It is structured to align with HuggingFace's configuration guidelines and best practices.
+
+model:
+  # Backbone Configuration
+  backbone:
+    name: "resnet50"                  # Backbone architecture name (e.g., 'resnet50', 'resnet101')
+    use_pretrained: true               # Whether to use pretrained weights for the backbone
+    config: {}                          # Additional backbone configuration parameters
+    kwargs:                             # Keyword arguments for backbone initialization
+      out_indices: [0, 1, 2, 3]          # Feature map indices to output from the backbone
+
+  # Transformer Configuration
+  transformer:
+    d_model: 256                        # Dimension of the Transformer layers
+    dropout: 0.1                        # Dropout probability for embeddings and Transformer layers
+    attention_dropout: 0.0              # Dropout probability for attention weights
+    activation_dropout: 0.0             # Dropout probability for activation functions
+    init_std: 0.02                      # Standard deviation for weight initialization
+    init_xavier_std: 1.0                 # Xavier initialization scaling factor
+
+    # Encoder Configuration
+    encoder:
+      layers: 6                         # Number of encoder layers
+      attention_heads: 8                # Number of attention heads in the encoder
+      ffn_dim: 1024                     # Dimension of the feed-forward network in the encoder
+      layerdrop: 0.0                    # LayerDrop probability for the encoder
+      n_points: 4                       # Number of sampled points in deformable attention
+
+    # Decoder Configuration
+    decoder:
+      layers: 6                         # Number of decoder layers
+      attention_heads: 8                # Number of attention heads in the decoder
+      ffn_dim: 1024                     # Dimension of the feed-forward network in the decoder
+      n_points: 4                       # Number of sampled points in deformable attention
+      with_box_refine: false            # Whether to apply box refinement in the decoder
+
+  # Object Detection Settings
+  object_detection:
+    num_queries: 300                    # Number of object queries (detection slots)
+    two_stage: false                    # Whether to use two-stage Deformable DETR
+    two_stage_num_proposals: 300        # Number of proposals if two_stage is enabled
+    num_feature_levels: 4               # Number of feature levels
+    class_cost: 1.0                     # Weight for classification loss in Hungarian matching
+    bbox_cost: 5.0                      # Weight for bounding box L1 loss in Hungarian matching
+    giou_cost: 2.0                      # Weight for GIoU loss in Hungarian matching
+    eos_coefficient: 0.1                # Weight for 'no-object' class in loss
+
+  # Loss Coefficients
+  loss:
+    mask_loss_coefficient: 1.0          # Weight for mask loss (if applicable)
+    dice_loss_coefficient: 1.0          # Weight for dice loss (if applicable)
+    bbox_loss_coefficient: 5.0          # Weight for bounding box L1 loss
+    giou_loss_coefficient: 2.0           # Weight for GIoU loss
+    focal_alpha: 0.25                   # Alpha parameter for focal loss
+
+  # Training Settings
+  training:
+    auxiliary_loss: false               # Whether to use auxiliary decoding losses
+    position_embedding_type: "sine"     # Type of position embeddings ("sine" or "learned")
+
+  # Attention Settings
+  attention:
+    disable_custom_kernels: false       # Whether to disable custom CUDA/CPU kernels (for ONNX export)
+
+  # Feature Extractor Configuration
+  feature_extractor:
+    format: "coco_detection"            # Data format of the annotations ("coco_detection" or "coco_panoptic")
+    do_resize: true                     # Whether to resize images during preprocessing
+    size:
+      shortest_edge: 800                # Shortest edge size after resizing
+      longest_edge: 1333                # Longest edge size after resizing
+    resample: "bilinear"                # Resampling filter for resizing (e.g., "bilinear", "nearest")
+    do_rescale: true                    # Whether to rescale image pixel values
+    rescale_factor: 0.00392156862745098 # Rescale factor (1/255)
+    do_normalize: true                  # Whether to normalize images
+    image_mean: [0.485, 0.456, 0.406]   # Mean values for normalization (ImageNet defaults)
+    image_std: [0.229, 0.224, 0.225]    # Standard deviation values for normalization (ImageNet defaults)
+    do_convert_annotations: true        # Whether to convert annotations to model expected format
+    do_pad: true                         # Whether to pad images
+    pad_size:                             
+      height: null                      # Padding height (set to null to pad to max in batch)
+      width: null                       # Padding width (set to null to pad to max in batch)
+
+  # Miscellaneous Settings
+  misc:
+    use_timm_backbone: true             # Whether to use the timm library for the backbone
+
+# Example Usage:
+# To use this configuration, load it using a YAML parser and pass the parameters to your model initialization.
+# Example in Python:
+#
+# import yaml
+# from src.models.zoo.deformable_detr import DeformableDetrModel
+#
+# with open("configs/models/deformable_detr.yaml", "r") as file:
+#     config = yaml.safe_load(file)
+#
+# model = DeformableDetrModel(
+#     model_name_or_path=config['model']['backbone']['name'],
+#     config=config['model'],
+#     num_labels=config['model']['object_detection']['num_queries'],
+#     device='cuda' if torch.cuda.is_available() else 'cpu'
+# )

@@ -1,0 +1,93 @@
+# configs/models/convnextv2.yaml
+
+# ===============================
+# Model Configuration
+# ===============================
+model:
+  name_or_path: "facebook/convnextv2-tiny-1k-224"  # Path to the pretrained ConvNeXTV2 model or Hugging Face model identifier
+  num_labels: 91  # Number of object detection classes (e.g., 80 for COCO dataset)
+  
+  # ConvNeXTV2 Architecture Parameters
+  image_size: 224  # Input image resolution (height and width)
+  patch_size: 4  # Patch size for the ConvNeXTV2 embedding layer
+  num_stages: 4  # Number of stages in the ConvNeXTV2 backbone
+  hidden_sizes: 
+    - 96
+    - 192
+    - 384
+    - 768  # Hidden dimensions for each stage
+  depths: 
+    - 3
+    - 3
+    - 9
+    - 3  # Number of blocks per stage
+  hidden_act: "gelu"  # Activation function (e.g., "gelu", "relu")
+  initializer_range: 0.02  # Standard deviation for weight initialization
+  layer_norm_eps: 1e-12  # Epsilon value for layer normalization
+  drop_path_rate: 0.0  # Drop path rate for stochastic depth regularization
+  out_features: 
+    - "stage1"
+    - "stage2"
+    - "stage3"
+    - "stage4"  # Features to output from the backbone
+  out_indices: 
+    - 1
+    - 2
+    - 3
+    - 4  # Indices corresponding to stages for feature extraction
+
+# ===============================
+# Training Configuration
+# ===============================
+training:
+  epochs: 10  # Total number of training epochs
+  batch_size: 8  # Batch size for training
+  learning_rate: 1e-4  # Learning rate for the optimizer
+  weight_decay: 0.01  # Weight decay (L2 regularization) coefficient
+  num_warmup_steps: 100  # Number of warmup steps for the learning rate scheduler
+  log_interval: 10  # Frequency (in steps) of logging training progress
+  use_amp: true  # Enable Automatic Mixed Precision for faster training and reduced memory usage
+
+# ===============================
+# Optimizer Configuration
+# ===============================
+optimizer:
+  type: "AdamW"  # Optimizer type (e.g., "AdamW", "SGD")
+  params:
+    lr: 1e-4  # Learning rate for the optimizer
+    weight_decay: 0.01  # Weight decay coefficient
+
+# ===============================
+# Scheduler Configuration
+# ===============================
+scheduler:
+  type: "linear"  # Scheduler type (e.g., "linear", "cosine")
+  params:
+    num_warmup_steps: 100  # Number of warmup steps
+    num_training_steps: 1000  # Total number of training steps
+
+# ===============================
+# Post-Processing Configuration
+# ===============================
+post_processing:
+  threshold: 0.5  # Score threshold to filter out low-confidence predictions
+  top_k: 100  # Maximum number of predictions to retain per image
+
+# ===============================
+# Data Configuration
+# ===============================
+data:
+  train_dataset: "path/to/train/dataset"  # Path to the training dataset
+  val_dataset: "path/to/val/dataset"  # Path to the validation dataset
+
+# ===============================
+# Logging Configuration
+# ===============================
+logging:
+  level: "INFO"  # Logging level (e.g., "DEBUG", "INFO", "WARNING", "ERROR")
+
+# ===============================
+# Additional Configuration Parameters
+# ===============================
+# Add any additional configuration parameters below as needed.
+# For example, you might include paths to checkpoints, data augmentation settings, etc.

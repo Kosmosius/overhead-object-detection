@@ -1,303 +1,171 @@
 # src/models/zoo/detr.py
 
-import torch
-from transformers import DetrForObjectDetection, DetrConfig, DetrImageProcessor
-from typing import Optional, List, Tuple, Dict, Any
-import logging
 import os
+from typing import Any, Dict, List, Optional, Union
 
-# Configure logging
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+import torch
+from transformers import DetrForObjectDetection, DetrConfig
 
-class DETR:
+from src.models.zoo.base_model import BaseModel
+from src.utils.evaluator import COCOEvaluator  # Ensure this utility is implemented
+
+
+class DETR(BaseModel):
     """
-    DETR (DEtection TRansformer) Model Wrapper for Object Detection.
+    DETR (DEtection TRansformer) Model for Object Detection.
 
-    This class wraps the Hugging Face DetrForObjectDetection model, providing methods
-    for initialization, forward pass, loading from local paths, and post-processing.
-    It is designed to facilitate usage in air-gapped environments by supporting
-    local model loading and offline operations.
+    This class inherits from BaseModel and provides implementations specific to DETR for object detection tasks.
+    It leverages Hugging Face's `DetrForObjectDetection` and `DetrImageProcessor` for model operations and preprocessing.
     """
 
     def __init__(
         self,
+        model_name_or_path: str = "facebook/detr-resnet-50",
         config: Optional[DetrConfig] = None,
-        pretrained: bool = True,
-        pretrained_path: Optional[str] = None,
-        use_pretrained_backbone: bool = True,
-        num_queries: int = 100,
-        device: Optional[torch.device] = None
+        num_labels: int = 91,  # COCO has 80 classes + 1 background + others
+        device: Optional[Union[str, torch.device]] = None,
+        **kwargs,
     ):
         """
-        Initialize the DETR model.
+        Initializes the DETR model.
 
-        Parameters:
+        Args:
+            model_name_or_path (str): Path to the pretrained model or model identifier from Hugging Face.
+                Defaults to "facebook/detr-resnet-50".
             config (DetrConfig, optional): Configuration for the DETR model.
                 If None, a default configuration is used.
-            pretrained (bool, optional): Whether to load pretrained weights.
-                If True and pretrained_path is provided, loads from the path.
-                If True and pretrained_path is None, loads from Hugging Face hub.
-                If False, initializes with random weights.
-            pretrained_path (str, optional): Local path to the pretrained model weights.
-                Used only if pretrained is True.
-            use_pretrained_backbone (bool, optional): Whether to use pretrained weights for the backbone.
-            num_queries (int, optional): Number of object queries. Determines the maximum number of objects DETR can detect.
-            device (torch.device, optional): Device to load the model on. If None, uses CUDA if available.
+            num_labels (int, optional): Number of labels for object detection.
+                Defaults to 91 for COCO dataset.
+            device (Optional[Union[str, torch.device]]): Device to run the model on ('cpu' or 'cuda').
+                If None, defaults to CUDA if available.
+            **kwargs: Additional keyword arguments for model configuration.
         """
-        self.device = device if device else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        logger.info(f"Initializing DETR model on device: {self.device}")
-
-        if config is None:
-            config = DetrConfig()
-            config.num_queries = num_queries
-            config.use_pretrained_backbone = use_pretrained_backbone
-            logger.info("Using default DetrConfig with num_queries set to 100 and pretrained backbone.")
-
-        else:
-            # Update configuration if provided
-            config.num_queries = num_queries
-            config.use_pretrained_backbone = use_pretrained_backbone
-            logger.info(f"Using provided DetrConfig with num_queries set to {num_queries}.")
-
-        # Initialize the model
-        if pretrained:
-            if pretrained_path:
-                if not os.path.exists(pretrained_path):
-                    logger.error(f"Pretrained model path '{pretrained_path}' does not exist.")
-                    raise FileNotFoundError(f"Pretrained model path '{pretrained_path}' does not exist.")
-                logger.info(f"Loading pretrained DETR model from local path: {pretrained_path}")
-                self.model = DetrForObjectDetection.from_pretrained(pretrained_path, config=config)
-            else:
-                logger.info("Loading pretrained DETR model from Hugging Face hub: 'facebook/detr-resnet-50'")
-                self.model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50", config=config)
-        else:
-            logger.info("Initializing DETR model with random weights.")
-            self.model = DetrForObjectDetection(config)
-
-        self.model.to(self.device)
-        self.model.eval()  # Set model to evaluation mode by default
-
-        # Initialize the image processor
-        if pretrained:
-            if pretrained_path:
-                self.image_processor = DetrImageProcessor.from_pretrained(pretrained_path)
-                logger.info(f"Loaded DetrImageProcessor from local path: {pretrained_path}")
-            else:
-                self.image_processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
-                logger.info("Loaded DetrImageProcessor from Hugging Face hub.")
-        else:
-            self.image_processor = DetrImageProcessor()
-            logger.info("Initialized DetrImageProcessor with default settings.")
+        super().__init__(
+            model_name_or_path=model_name_or_path,
+            model_class=DetrForObjectDetection,
+            config=config,
+            num_labels=num_labels,
+            device=device,
+            **kwargs,
+        )
 
     def forward(
         self,
-        images: List[torch.Tensor],
+        pixel_values: torch.Tensor,
         pixel_mask: Optional[torch.Tensor] = None,
-        labels: Optional[List[Dict[str, Any]]] = None
+        labels: Optional[List[Dict[str, Any]]] = None,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Perform a forward pass through the DETR model.
 
-        Parameters:
-            images (List[torch.Tensor]): List of images to process. Each image should be a tensor of shape (3, H, W).
-            pixel_mask (torch.Tensor, optional): Mask tensor indicating valid pixels. Shape (batch_size, H, W).
-            labels (List[Dict[str, Any]], optional): List of labels for training. Each dict should contain 'class_labels' and 'boxes'.
+        Args:
+            pixel_values (torch.Tensor): Tensor of shape (batch_size, 3, H, W) representing input images.
+            pixel_mask (torch.Tensor, optional): Tensor of shape (batch_size, H, W) indicating valid pixels.
+            labels (List[Dict[str, Any]], optional): List of labels for training.
+                Each dict should contain 'class_labels' and 'boxes'.
 
         Returns:
             torch.Tensor: Model outputs.
         """
-        logger.debug("Starting forward pass through DETR model.")
-        
-        # Preprocess images
-        inputs = self.image_processor(images=images, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        inputs = {
+            'pixel_values': pixel_values,
+            'pixel_mask': pixel_mask,
+            'labels': labels,
+        }
 
-        if pixel_mask is not None:
-            inputs['pixel_mask'] = pixel_mask.to(self.device)
-            logger.debug("Added pixel_mask to inputs.")
-
-        if labels is not None:
-            inputs['labels'] = labels
-            logger.debug("Added labels to inputs.")
-
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-
-        logger.debug("Forward pass completed.")
+        outputs = self.model(**inputs, **kwargs)
         return outputs
 
-    def post_process(
-        self,
-        outputs: torch.Tensor,
-        threshold: float = 0.5,
-        target_sizes: Optional[List[Tuple[int, int]]] = None
-    ) -> List[Dict[str, Any]]:
+    def compute_loss(self, outputs: Any, targets: Any) -> torch.Tensor:
         """
-        Post-process the raw outputs of the DETR model to obtain bounding boxes and labels.
+        Computes the loss given model outputs and targets.
 
-        Parameters:
-            outputs (torch.Tensor): Raw outputs from the DETR model.
-            threshold (float, optional): Score threshold to filter predictions.
-            target_sizes (List[Tuple[int, int]], optional): List of target sizes (height, width) for resizing boxes.
+        Args:
+            outputs (Any): Outputs from the model.
+            targets (Any): Ground truth targets.
 
         Returns:
-            List[Dict[str, Any]]: List of dictionaries containing 'scores', 'labels', and 'boxes' for each image.
+            torch.Tensor: The computed loss.
         """
-        logger.debug("Starting post-processing of DETR outputs.")
-        results = self.image_processor.post_process_object_detection(outputs, threshold=threshold, target_sizes=target_sizes)
-        logger.debug("Post-processing completed.")
-        return results
+        return outputs.loss
 
-    def load_local_pretrained(self, path: str):
+    def compute_metrics(self, outputs: List[Any], targets: List[Any], image_ids: List[Any]) -> Dict[str, float]:
         """
-        Load pretrained DETR model weights from a local directory.
+        Computes evaluation metrics based on model outputs and targets.
 
-        Parameters:
-            path (str): Path to the directory containing the pretrained model weights.
-        """
-        if not os.path.exists(path):
-            logger.error(f"Pretrained model path '{path}' does not exist.")
-            raise FileNotFoundError(f"Pretrained model path '{path}' does not exist.")
-        
-        logger.info(f"Loading pretrained DETR model from local path: {path}")
-        self.model = DetrForObjectDetection.from_pretrained(path, config=self.model.config)
-        self.model.to(self.device)
-        self.model.eval()
-        logger.info("Pretrained DETR model loaded successfully.")
-
-    def save_pretrained(self, save_path: str):
-        """
-        Save the DETR model and image processor to a local directory.
-
-        Parameters:
-            save_path (str): Directory path to save the model and processor.
-        """
-        os.makedirs(save_path, exist_ok=True)
-        logger.info(f"Saving DETR model to: {save_path}")
-        self.model.save_pretrained(save_path)
-        self.image_processor.save_pretrained(save_path)
-        logger.info("DETR model and image processor saved successfully.")
-
-    def train(
-        self,
-        train_dataloader: torch.utils.data.DataLoader,
-        optimizer: torch.optim.Optimizer,
-        scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-        num_epochs: int = 10,
-        device: Optional[torch.device] = None
-    ):
-        """
-        Train the DETR model.
-
-        Parameters:
-            train_dataloader (torch.utils.data.DataLoader): DataLoader for training data.
-            optimizer (torch.optim.Optimizer): Optimizer for training.
-            scheduler (torch.optim.lr_scheduler._LRScheduler, optional): Learning rate scheduler.
-            num_epochs (int, optional): Number of training epochs.
-            device (torch.device, optional): Device to train the model on.
-        """
-        device = device if device else self.device
-        self.model.to(device)
-        self.model.train()
-        logger.info(f"Starting training for {num_epochs} epochs on device: {device}")
-
-        for epoch in range(num_epochs):
-            epoch_loss = 0.0
-            for batch_idx, batch in enumerate(train_dataloader):
-                optimizer.zero_grad()
-                
-                images = batch['images']
-                labels = batch['labels']
-                pixel_mask = batch.get('pixel_mask', None)
-
-                # Preprocess images
-                inputs = self.image_processor(images=images, return_tensors="pt")
-                inputs = {k: v.to(device) for k, v in inputs.items()}
-
-                if pixel_mask is not None:
-                    inputs['pixel_mask'] = pixel_mask.to(device)
-
-                inputs['labels'] = labels
-
-                # Forward pass
-                outputs = self.model(**inputs)
-                loss = outputs.loss
-                loss.backward()
-                optimizer.step()
-                
-                epoch_loss += loss.item()
-
-                if scheduler:
-                    scheduler.step()
-
-                if (batch_idx + 1) % 10 == 0:
-                    logger.info(f"Epoch [{epoch+1}/{num_epochs}], Step [{batch_idx+1}/{len(train_dataloader)}], Loss: {loss.item():.4f}")
-
-            avg_loss = epoch_loss / len(train_dataloader)
-            logger.info(f"Epoch [{epoch+1}/{num_epochs}] completed. Average Loss: {avg_loss:.4f}")
-
-    def evaluate(
-        self,
-        eval_dataloader: torch.utils.data.DataLoader,
-        device: Optional[torch.device] = None
-    ) -> Dict[str, float]:
-        """
-        Evaluate the DETR model.
-
-        Parameters:
-            eval_dataloader (torch.utils.data.DataLoader): DataLoader for evaluation data.
-            device (torch.device, optional): Device to evaluate the model on.
+        Args:
+            outputs (List[Any]): List of model outputs.
+            targets (List[Any]): List of ground truth targets.
+            image_ids (List[Any]): List of image identifiers.
 
         Returns:
             Dict[str, float]: Dictionary of evaluation metrics.
         """
-        device = device if device else self.device
-        self.model.to(device)
-        self.model.eval()
-        logger.info(f"Starting evaluation on device: {device}")
+        evaluator = COCOEvaluator()
+        for output, target, image_id in zip(outputs, targets, image_ids):
+            # Post-process predictions to obtain final detections
+            predictions = self.post_process_predictions(output, threshold=0.5)
+            evaluator.update(predictions, target, image_id)
 
-        # Initialize evaluation metrics (e.g., COCO Evaluator)
-        # Placeholder for actual evaluator implementation
-        # from utils.evaluator import COCOEvaluator
-        # evaluator = COCOEvaluator()
+        metrics = evaluator.compute()
+        return metrics
 
-        # For demonstration, we'll compute average loss
-        total_loss = 0.0
-        num_batches = 0
+    def save_pretrained(self, save_directory: str):
+        """
+        Saves the DETR model and feature extractor to the specified directory.
 
-        with torch.no_grad():
-            for batch_idx, batch in enumerate(eval_dataloader):
-                images = batch['images']
-                labels = batch['labels']
-                pixel_mask = batch.get('pixel_mask', None)
+        Args:
+            save_directory (str): Directory path to save the model and processor.
+        """
+        super().save(save_directory)
+        # Additional saving steps specific to DETR can be added here if necessary
 
-                # Preprocess images
-                inputs = self.image_processor(images=images, return_tensors="pt")
-                inputs = {k: v.to(device) for k, v in inputs.items()}
+"""
+# train_detr.py
 
-                if pixel_mask is not None:
-                    inputs['pixel_mask'] = pixel_mask.to(device)
+import torch
+from torch.utils.data import DataLoader
 
-                inputs['labels'] = labels
+from src.models.zoo.detr import DETR
+from src.utils.datasets import CustomCOCODataset  # Ensure this dataset is implemented
 
-                # Forward pass
-                outputs = self.model(**inputs)
-                loss = outputs.loss
-                total_loss += loss.item()
-                num_batches += 1
+def main():
+    # Initialize model
+    model = DETR(
+        model_name_or_path="facebook/detr-resnet-50",
+        num_labels=91,  # Adjust based on your dataset
+        device="cuda" if torch.cuda.is_available() else "cpu",
+    )
 
-                # Update evaluator with predictions and references
-                # predictions = self.post_process(outputs, threshold=0.5, target_sizes=[img.shape[-2:] for img in images])
-                # evaluator.update(predictions, labels)
+    # Prepare datasets and dataloaders
+    train_dataset = CustomCOCODataset(split="train")
+    val_dataset = CustomCOCODataset(split="val")
 
-        avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
-        logger.info(f"Evaluation completed. Average Loss: {avg_loss:.4f}")
+    train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
+    val_dataloader = DataLoader(val_dataset, batch_size=8, shuffle=False, num_workers=4)
 
-        # Compute final metrics
-        # metrics = evaluator.compute()
-        # return metrics
+    # Initialize optimizer and scheduler
+    optimizer = model.get_optimizer(learning_rate=1e-4, weight_decay=0.01)
+    scheduler = model.get_scheduler(
+        optimizer=optimizer,
+        scheduler_class=torch.optim.lr_scheduler.StepLR,
+        scheduler_params={"step_size": 3, "gamma": 0.1},
+    )
 
-        # Placeholder return
-        return {"average_loss": avg_loss}
+    # Train the model
+    model.fit(
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
+        epochs=10,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        log_interval=50,
+    )
 
+    # Save the trained model
+    model.save_pretrained("path/to/save/detr_model")
+
+if __name__ == "__main__":
+    main()
+"""

@@ -1,0 +1,184 @@
+# Configuration for Conditional DETR Model
+# File: configs/models/conditional_detr.yaml
+
+model:
+  # Path or identifier for the pretrained Conditional DETR model
+  model_name_or_path: "microsoft/conditional-detr-resnet-50"
+  
+  # Task type: "object_detection" or "segmentation"
+  task: "object_detection"
+  
+  # Model configuration parameters
+  config:
+    # Whether to use the timm library for the backbone
+    use_timm_backbone: true
+    
+    # Backbone architecture
+    backbone: "resnet50"
+    
+    # Number of object queries (detection slots)
+    num_queries: 300
+    
+    # Dimension of the Transformer layers
+    d_model: 256
+    
+    # Number of encoder and decoder layers in the Transformer
+    encoder_layers: 6
+    decoder_layers: 6
+    
+    # Number of attention heads in each Transformer layer
+    encoder_attention_heads: 8
+    decoder_attention_heads: 8
+    
+    # Dimension of the feed-forward network in the Transformer
+    encoder_ffn_dim: 2048
+    decoder_ffn_dim: 2048
+    
+    # Activation function in the Transformer layers
+    activation_function: "relu"
+    
+    # Dropout rates
+    dropout: 0.1
+    attention_dropout: 0.0
+    activation_dropout: 0.0
+    
+    # Initialization parameters
+    init_std: 0.02
+    init_xavier_std: 1.0
+    
+    # Auxiliary loss parameters
+    auxiliary_loss: false
+    
+    # Type of position embeddings
+    position_embedding_type: "sine"
+    
+    # Whether to use a pretrained backbone
+    use_pretrained_backbone: true
+    
+    # Dilation in the backbone
+    dilation: false
+    
+    # Hungarian matching costs
+    class_cost: 2
+    bbox_cost: 5
+    giou_cost: 2
+    
+    # Loss coefficients for segmentation tasks
+    mask_loss_coefficient: 1
+    dice_loss_coefficient: 1
+    
+    # Loss coefficients for object detection tasks
+    bbox_loss_coefficient: 5
+    giou_loss_coefficient: 2
+    
+    # Focal loss alpha parameter
+    focal_alpha: 0.25
+    
+    # Additional keyword arguments (if any)
+    # Example:
+    # additional_params:
+    #   param1: value1
+    #   param2: value2
+
+training:
+  # Number of training epochs
+  epochs: 50
+  
+  # Optimizer configuration
+  optimizer:
+    # Optimizer class
+    class: "AdamW"
+    
+    # Optimizer parameters
+    params:
+      lr: 1e-4
+      weight_decay: 0.01
+      
+  # Learning rate scheduler configuration
+  scheduler:
+    # Scheduler class
+    class: "get_linear_schedule_with_warmup"
+    
+    # Scheduler parameters
+    params:
+      num_warmup_steps: 100
+      num_training_steps: 1000
+      
+  # Gradient accumulation steps
+  gradient_accumulation_steps: 1
+  
+  # Mixed precision training
+  mixed_precision: false
+  
+  # Logging interval (steps)
+  log_interval: 10
+  
+  # Checkpoint saving interval (epochs)
+  save_interval: 5
+  
+  # Evaluation interval (epochs)
+  eval_interval: 1
+
+data:
+  # Training data configuration
+  train:
+    # Path to the training dataset
+    dataset_path: "path/to/train/dataset"
+    
+    # Batch size for training
+    batch_size: 16
+    
+    # Number of worker threads for data loading
+    num_workers: 4
+    
+    # Data augmentation strategies
+    augmentation:
+      horizontal_flip: true
+      random_crop: 
+        enabled: true
+        size: [800, 1333]
+      color_jitter:
+        brightness: 0.4
+        contrast: 0.4
+        saturation: 0.4
+        hue: 0.1
+      
+  # Validation data configuration
+  validation:
+    # Path to the validation dataset
+    dataset_path: "path/to/val/dataset"
+    
+    # Batch size for validation
+    batch_size: 16
+    
+    # Number of worker threads for data loading
+    num_workers: 4
+
+evaluation:
+  # Evaluation metrics
+  metrics:
+    - "mAP"
+    - "mAP_50"
+    - "mAP_75"
+    
+  # COCO evaluation parameters
+  coco:
+    # Type of COCO task: "bbox" or "segm"
+    task_type: "bbox"
+
+misc:
+  # Seed for reproducibility
+  seed: 42
+  
+  # Device configuration
+  device: "cuda"  # Options: "cuda", "cpu"
+  
+  # Directory to save model checkpoints and logs
+  output_dir: "outputs/conditional_detr"
+  
+  # Enable or disable progress bar
+  use_progress_bar: true
+  
+  # Resume training from a checkpoint
+  resume_from_checkpoint: null  # e.g., "path/to/checkpoint"
+

@@ -1,30 +1,41 @@
 # configs/models/pvtv2.yaml
 
 pvtv2:
+  # ==========================
   # Global Configuration Parameters
-  image_size: 224                            # Input image size (height, width). Can be an integer or a tuple.
+  # ==========================
+  
+  # Input specifications
+  image_size: 224                            # Input image size. Can be an integer or a tuple (height, width).
   num_channels: 3                            # Number of input channels (e.g., 3 for RGB images).
+
+  # Encoder specifications
   num_encoder_blocks: 4                      # Number of encoder blocks (stages) in the PVTv2 model.
-  hidden_act: "gelu"                          # Activation function used in the encoder and pooler.
-  hidden_dropout_prob: 0.0                    # Dropout probability for fully connected layers in embeddings, encoder, and pooler.
-  attention_probs_dropout_prob: 0.0           # Dropout ratio for the attention probabilities.
-  initializer_range: 0.02                     # Standard deviation for initializing weight matrices.
-  drop_path_rate: 0.0                         # Dropout probability for stochastic depth in the encoder blocks.
-  layer_norm_eps: 1e-6                        # Epsilon value for layer normalization.
-  qkv_bias: true                              # Whether to add a learnable bias to the queries, keys, and values.
-  linear_attention: false                     # Whether to use linear attention for reduced complexity.
+  hidden_act: "gelu"                         # Activation function used in the encoder and pooler.
+  hidden_dropout_prob: 0.0                   # Dropout probability for fully connected layers in embeddings, encoder, and pooler.
+  attention_probs_dropout_prob: 0.0          # Dropout ratio for the attention probabilities.
+  initializer_range: 0.02                    # Standard deviation for initializing weight matrices.
+  drop_path_rate: 0.0                        # Dropout probability for stochastic depth in the encoder blocks.
+  layer_norm_eps: 1e-6                       # Epsilon value for layer normalization.
+  qkv_bias: true                             # Whether to add a learnable bias to the queries, keys, and values.
+  linear_attention: false                    # Whether to use linear attention for reduced complexity.
+
+  # Feature extraction specifications
   out_features:                               # List of feature map names to output from the backbone.
     - stage1
     - stage2
     - stage3
     - stage4
-  out_indices:                                 # Indices of the encoder blocks corresponding to the output features.
+  out_indices:                                # Indices of the encoder blocks corresponding to the output features.
     - 1
     - 2
     - 3
     - 4
 
+  # ==========================
   # Model-Specific Configurations
+  # ==========================
+  
   models:
     b0:
       model_name: "OpenGVLab/pvt_v2_b0"        # Hugging Face model identifier for PVTv2-B0.
@@ -35,7 +46,7 @@ pvtv2:
       strides: [4, 2, 2, 2]                     # Strides for overlapping patch embeddings.
       num_attention_heads: [1, 2, 5, 8]         # Number of attention heads in each encoder block.
       mlp_ratios: [8, 8, 4, 4]                  # MLP ratios for the feed-forward networks in each encoder block.
-
+    
     b1:
       model_name: "OpenGVLab/pvt_v2_b1"
       depths: [2, 2, 6, 2]
@@ -45,7 +56,7 @@ pvtv2:
       strides: [4, 2, 2, 2]
       num_attention_heads: [2, 4, 10, 16]
       mlp_ratios: [8, 8, 4, 4]
-
+    
     b2:
       model_name: "OpenGVLab/pvt_v2_b2"
       depths: [3, 4, 6, 3]
@@ -55,7 +66,7 @@ pvtv2:
       strides: [4, 2, 2, 2]
       num_attention_heads: [2, 4, 10, 16]
       mlp_ratios: [8, 8, 4, 4]
-
+    
     b3:
       model_name: "OpenGVLab/pvt_v2_b3"
       depths: [3, 4, 18, 3]
@@ -65,7 +76,7 @@ pvtv2:
       strides: [4, 2, 2, 2]
       num_attention_heads: [3, 6, 15, 30]
       mlp_ratios: [8, 8, 4, 4]
-
+    
     b4:
       model_name: "OpenGVLab/pvt_v2_b4"
       depths: [3, 8, 27, 3]
@@ -75,7 +86,7 @@ pvtv2:
       strides: [4, 2, 2, 2]
       num_attention_heads: [4, 8, 20, 40]
       mlp_ratios: [8, 8, 4, 4]
-
+    
     b5:
       model_name: "OpenGVLab/pvt_v2_b5"
       depths: [3, 8, 27, 3]

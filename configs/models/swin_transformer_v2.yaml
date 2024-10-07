@@ -1,51 +1,58 @@
 # configs/models/swin_transformer_v2.yaml
 
 # Configuration for Swin Transformer V2 Model
+# Reference: https://huggingface.co/docs/transformers/model_doc/swinv2
 
+model_type: swinv2  # The type of model, used by Hugging Face
+
+# Image Parameters
 image_size: 224  # The size (resolution) of each input image (height and width).
 patch_size: 4  # The size of each image patch (height and width).
 num_channels: 3  # Number of input image channels (e.g., RGB).
+
+# Embedding Parameters
 embed_dim: 96  # Dimensionality of patch embeddings.
+
+# Transformer Encoder Parameters
 depths: [2, 2, 6, 2]  # Number of Transformer blocks in each stage.
 num_heads: [3, 6, 12, 24]  # Number of attention heads in each stage.
 window_size: 7  # Size of the attention window.
 pretrained_window_sizes: [0, 0, 0, 0]  # Window sizes during pretraining. 0 indicates no change.
 mlp_ratio: 4.0  # Ratio of MLP hidden dimensionality to embedding dimensionality.
+
+# Attention Parameters
 qkv_bias: true  # Whether to add a learnable bias to the QKV projections.
 hidden_dropout_prob: 0.0  # Dropout probability for fully connected layers in embeddings and encoder.
 attention_probs_dropout_prob: 0.0  # Dropout probability for attention probabilities.
 drop_path_rate: 0.1  # Stochastic depth rate.
+
+# Activation Parameters
 hidden_act: "gelu"  # Activation function to use ("gelu", "relu", etc.).
+
+# Positional Encoding Parameters
 use_absolute_embeddings: false  # Whether to use absolute position embeddings.
+
+# Initialization Parameters
 initializer_range: 0.02  # Standard deviation for initializing weights.
 layer_norm_eps: 1e-05  # Epsilon for layer normalization.
+
+# Encoder Parameters
 encoder_stride: 32  # Stride factor to increase spatial resolution in decoder head for masked image modeling.
+
+# Output Parameters
 out_features: null  # List of feature names to output. Set to null to use default.
 out_indices: null  # List of stage indices to output. Set to null to use default.
 
-# Additional Parameters (if needed)
-# You can uncomment and modify these parameters based on your specific requirements.
+# Task-specific Parameters
+num_labels: 1000  # Number of classification labels (for image classification tasks).
 
-# num_classes: 1000  # Number of classification classes (for image classification tasks).
+# Optional Parameters
+# Uncomment and modify the following parameters based on your specific requirements.
+
 # use_checkpoint: false  # Whether to use gradient checkpointing to save memory.
 # use_rel_pos_bias: true  # Whether to use relative position bias in attention.
 # drop_path_rate: 0.2  # Example of increasing drop path rate for larger models.
 
-# Example Usage:
-# To initialize the Swin Transformer V2 model with this configuration, use the following code snippet:
-
-# from transformers import Swinv2Config, Swinv2Model
-# import yaml
-
-# # Load the configuration from the YAML file
-# with open('configs/models/swin_transformer_v2.yaml', 'r') as file:
-#     config_dict = yaml.safe_load(file)
-
-# # Initialize the Swinv2Config
-# config = Swinv2Config(**config_dict)
-
-# # Initialize the Swin Transformer V2 model
-# model = Swinv2Model(config)
-
-# # To load pretrained weights
-# # model = Swinv2Model.from_pretrained('microsoft/swinv2-tiny-patch4-window8-256', config=config)
+# Notes:
+# - Ensure that the 'num_labels' parameter is set appropriately for your task.
+# - The 'drop_path_rate' can be adjusted based on model size; larger models may benefit from higher drop path rates.

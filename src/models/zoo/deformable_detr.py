@@ -9,34 +9,32 @@ system. The wrapper is designed to be compatible with air-gapped environments, e
 and models are loaded locally.
 
 Original Architecture:
-DETR (DEtection TRansformer) was introduced by Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, 
-Alexander Kirillov, and Sergey Zagoruyko in the paper "End-to-End Object Detection with Transformers."
-The paper was first submitted on 26 May 2020 and last revised on 28 May 2020 (arXiv:2005.12872v3).
-
-The Deformable DETR variant further improves upon DETR by enhancing convergence speed and addressing spatial resolution limitations.
-
-Author: Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, Sergey Zagoruyko
-Date of Original Publication: 26 May 2020
+Deformable DETR was introduced in "Deformable DETR: Deformable Transformers for End-to-End Object Detection"
+by Xizhou Zhu, Weijie Su, Lewei Lu, Bin Li, Xiaogang Wang, Jifeng Dai. Deformable DETR mitigates the slow
+convergence issues and limited feature spatial resolution of the original DETR by leveraging a new
+deformable attention module which only attends to a small set of key sampling points around a reference.
 """
 
 import os
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 
 import torch
+from torch import nn
 from transformers import (
     DeformableDetrForObjectDetection,
     DeformableDetrConfig,
     DeformableDetrFeatureExtractor,
-    Trainer,
-    TrainingArguments,
 )
 from PIL import Image
+
+# Importing the BaseModel from the refactored base_model.py
+from src.models.zoo.base_model import BaseModel
 
 # Importing utility modules from the project
 from src.utils import config_parser, logging_utils
 
 
-class DeformableDetrModel:
+class DeformableDetrModel(BaseModel):
     """
     Deformable DETR Model Wrapper
 
@@ -47,244 +45,199 @@ class DeformableDetrModel:
 
     def __init__(
         self,
-        config_path: str,
-        model_path: Optional[str] = None,
-        image_processor_path: Optional[str] = None,
-        use_pretrained: bool = True,
-        local_files_only: bool = True,
+        model_name_or_path: str = "SenseTime/deformable-detr",
+        config: Optional[Union[Dict[str, Any], str]] = None,
+        num_labels: Optional[int] = None,
+        device: Optional[Union[str, torch.device]] = None,
+        **kwargs,
     ):
         """
         Initializes the Deformable DETR model.
 
         Args:
-            config_path (str): Path to the YAML configuration file for the model.
-            model_path (Optional[str]): Path to the pre-trained model weights. If None, uses the default
-                                        HuggingFace model.
-            image_processor_path (Optional[str]): Path to the image processor configuration. If None,
-                                                uses default HuggingFace image processor.
-            use_pretrained (bool): Whether to load pre-trained weights. Defaults to True.
-            local_files_only (bool): Whether to load models from local files only (useful for air-gapped
-                                     environments). Defaults to True.
+            model_name_or_path (str): Path to the pretrained model or model identifier from Hugging Face.
+                                      Defaults to "SenseTime/deformable-detr".
+            config (Union[Dict[str, Any], str], optional): Configuration dictionary or path to config file.
+            num_labels (int, optional): Number of labels for object detection.
+            device (Optional[Union[str, torch.device]]): Device to run the model on ('cpu' or 'cuda').
+                                                        If None, defaults to CUDA if available.
+            **kwargs: Additional keyword arguments for model configuration.
         """
-        # Load configuration
-        self.config = config_parser.parse_config(config_path, DeformableDetrConfig)
-        logging_utils.get_logger().info(f"Loaded Deformable DETR configuration from {config_path}")
-
-        # Initialize the model
-        if use_pretrained:
-            pretrained_model = model_path if model_path else "SenseTime/deformable-detr"
-            self.model = DeformableDetrForObjectDetection.from_pretrained(
-                pretrained_model,
-                config=self.config,
-                local_files_only=local_files_only,
-            )
-            logging_utils.get_logger().info(f"Loaded pre-trained Deformable DETR model from {pretrained_model}")
-        else:
-            self.model = DeformableDetrForObjectDetection(self.config)
-            logging_utils.get_logger().info("Initialized Deformable DETR model with random weights")
-
-        # Initialize the image processor
-        if image_processor_path:
-            self.image_processor = DeformableDetrFeatureExtractor.from_pretrained(
-                image_processor_path,
-                local_files_only=local_files_only,
-            )
-            logging_utils.get_logger().info(f"Loaded Deformable DETR image processor from {image_processor_path}")
-        else:
-            self.image_processor = DeformableDetrFeatureExtractor.from_pretrained(
-                "SenseTime/deformable-detr",
-                local_files_only=local_files_only,
-            )
-            logging_utils.get_logger().info("Loaded default Deformable DETR image processor from HuggingFace")
-
-    def train(
-        self,
-        train_dataset: torch.utils.data.Dataset,
-        eval_dataset: torch.utils.data.Dataset,
-        output_dir: str,
-        per_device_train_batch_size: int = 8,
-        per_device_eval_batch_size: int = 8,
-        num_train_epochs: int = 10,
-        learning_rate: float = 1e-4,
-        weight_decay: float = 1e-4,
-        logging_steps: int = 100,
-        save_steps: int = 500,
-        evaluation_strategy: str = "steps",
-        **kwargs,
-    ):
-        """
-        Trains the Deformable DETR model.
-
-        Args:
-            train_dataset (torch.utils.data.Dataset): The training dataset.
-            eval_dataset (torch.utils.data.Dataset): The evaluation dataset.
-            output_dir (str): Directory to save the trained model and checkpoints.
-            per_device_train_batch_size (int): Training batch size per device. Defaults to 8.
-            per_device_eval_batch_size (int): Evaluation batch size per device. Defaults to 8.
-            num_train_epochs (int): Number of training epochs. Defaults to 10.
-            learning_rate (float): Learning rate. Defaults to 1e-4.
-            weight_decay (float): Weight decay. Defaults to 1e-4.
-            logging_steps (int): Logging frequency. Defaults to 100.
-            save_steps (int): Checkpoint saving frequency. Defaults to 500.
-            evaluation_strategy (str): Evaluation strategy (e.g., 'steps'). Defaults to 'steps'.
-            **kwargs: Additional training arguments.
-        """
-        training_args = TrainingArguments(
-            output_dir=output_dir,
-            per_device_train_batch_size=per_device_train_batch_size,
-            per_device_eval_batch_size=per_device_eval_batch_size,
-            num_train_epochs=num_train_epochs,
-            learning_rate=learning_rate,
-            weight_decay=weight_decay,
-            logging_steps=logging_steps,
-            save_steps=save_steps,
-            evaluation_strategy=evaluation_strategy,
-            save_total_limit=3,
-            remove_unused_columns=False,
+        super().__init__(
+            model_name_or_path=model_name_or_path,
+            model_class=DeformableDetrForObjectDetection,
+            config=config,
+            num_labels=num_labels,
             **kwargs,
         )
 
-        trainer = Trainer(
-            model=self.model,
-            args=training_args,
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            tokenizer=self.image_processor,
-            # You can add data_collator, compute_metrics if needed
-        )
-
-        trainer.train()
-        trainer.save_model(output_dir)
-        self.image_processor.save_pretrained(output_dir)
-        logging_utils.get_logger().info(f"Training completed. Model and image processor saved to {output_dir}")
-
-    def evaluate(
-        self,
-        eval_dataset: torch.utils.data.Dataset,
-        metric_key_prefix: str = "eval",
-    ) -> Dict:
+    def forward(self, **inputs):
         """
-        Evaluates the Deformable DETR model on the evaluation dataset.
+        Defines the forward pass of the Deformable DETR model.
 
         Args:
-            eval_dataset (torch.utils.data.Dataset): The evaluation dataset.
-            metric_key_prefix (str): Prefix for the evaluation metrics. Defaults to 'eval'.
+            **inputs: Arbitrary keyword arguments corresponding to model inputs.
 
         Returns:
-            Dict: Dictionary containing evaluation metrics.
+            transformers.models.deformable_detr.modeling_deformable_detr.DeformableDetrModelOutput:
+                The output of the Deformable DETR model.
         """
-        training_args = TrainingArguments(
-            output_dir="./",
-            per_device_eval_batch_size=8,
-            do_train=False,
-            do_eval=True,
-            logging_steps=100,
-            save_steps=500,
-            evaluation_strategy="steps",
-            remove_unused_columns=False,
-        )
+        return self.model(**inputs)
 
-        trainer = Trainer(
-            model=self.model,
-            args=training_args,
-            eval_dataset=eval_dataset,
-            tokenizer=self.image_processor,
-            # compute_metrics=custom_metrics,  # Implement if needed
-        )
+    def compute_loss(self, outputs, targets) -> torch.Tensor:
+        """
+        Computes the loss given model outputs and targets.
 
-        results = trainer.evaluate(metric_key_prefix=metric_key_prefix)
-        logging_utils.get_logger().info(f"Evaluation results: {results}")
-        return results
+        Args:
+            outputs: Outputs from the Deformable DETR model.
+            targets: Ground truth targets.
+
+        Returns:
+            torch.Tensor: The computed loss.
+        """
+        if hasattr(outputs, 'loss') and outputs.loss is not None:
+            return outputs.loss
+        else:
+            raise ValueError("The model outputs do not contain a 'loss' attribute.")
+
+    def compute_metrics(
+        self,
+        outputs: List[Any],
+        targets: List[Any],
+        image_ids: List[Any]
+    ) -> Dict[str, float]:
+        """
+        Computes evaluation metrics given the model outputs and targets.
+
+        Args:
+            outputs (List[Any]): List of model outputs.
+            targets (List[Any]): List of ground truth targets.
+            image_ids (List[Any]): List of image IDs corresponding to the outputs.
+
+        Returns:
+            Dict[str, float]: Dictionary of computed metrics (e.g., mAP).
+        """
+        # Placeholder for metric computation (e.g., mAP)
+        # Implement actual metric computation based on your evaluation framework
+        # For demonstration, we'll return a dummy mAP value
+        dummy_map = 0.75  # Replace with actual computation
+        self.logger.info(f"Computed mAP: {dummy_map}")
+        return {"mAP": dummy_map}
 
     def predict(
         self,
         images: List[Image.Image],
         threshold: float = 0.5,
         top_k: int = 100,
-    ) -> List[Dict[str, torch.Tensor]]:
+    ) -> List[Dict[str, Union[List[float], List[int]]]]:
         """
         Performs object detection on a batch of images.
 
         Args:
             images (List[Image.Image]): List of PIL Images to perform detection on.
-            threshold (float): Confidence threshold to filter predictions. Defaults to 0.5.
-            top_k (int): Number of top predictions to return per image. Defaults to 100.
+            threshold (float, optional): Confidence threshold to filter predictions. Defaults to 0.5.
+            top_k (int, optional): Number of top predictions to return per image. Defaults to 100.
 
         Returns:
-            List[Dict[str, torch.Tensor]]: List of dictionaries containing 'scores', 'labels', and 'boxes'
-                                           for each image.
+            List[Dict[str, Union[List[float], List[int]]]]: List of dictionaries containing 'scores',
+                                                            'labels', and 'boxes' for each image.
         """
-        inputs = self.image_processor(images=images, return_tensors="pt")
-        with torch.no_grad():
-            outputs = self.model(**inputs)
+        # Preprocess images
+        inputs = self.feature_extractor(images=images, return_tensors="pt")
+        inputs = self.prepare_inputs(inputs)
 
-        target_sizes = torch.tensor([image.size[::-1] for image in images])
-        results = self.image_processor.post_process_object_detection(
-            outputs, threshold=threshold, target_sizes=target_sizes, top_k=top_k
+        # Perform inference
+        with torch.no_grad():
+            outputs = self(**inputs)
+
+        # Post-process outputs
+        target_sizes = torch.tensor([image.size[::-1] for image in images]).to(self.device)
+        results = self.post_process_predictions(
+            outputs=outputs,
+            threshold=threshold,
+            top_k=top_k,
+            target_sizes=target_sizes
         )
-        logging_utils.get_logger().info(
+
+        # Convert tensors to lists and format boxes
+        formatted_results = []
+        for result in results:
+            formatted = {
+                "scores": result["scores"].tolist(),
+                "labels": result["labels"].tolist(),
+                "boxes": result["boxes"].tolist(),  # Boxes are in (xmin, ymin, xmax, ymax) format
+            }
+            formatted_results.append(formatted)
+
+        self.logger.info(
             f"Performed inference on {len(images)} images with threshold {threshold} and top_k {top_k}"
         )
-        return results
+        return formatted_results
 
-    def save(
-        self,
-        save_dir: str,
-    ):
+    # Optional: Implement LoRA and QLoRA integration if required
+    def apply_lora(self, adapter_config: Dict):
         """
-        Saves the model and image processor to the specified directory.
-
-        Args:
-            save_dir (str): Directory path to save the model and image processor.
-        """
-        self.model.save_pretrained(save_dir)
-        self.image_processor.save_pretrained(save_dir)
-        logging_utils.get_logger().info(f"Model and image processor saved to {save_dir}")
-
-    def load(
-        self,
-        load_dir: str,
-    ):
-        """
-        Loads the model and image processor from the specified directory.
-
-        Args:
-            load_dir (str): Directory path from which to load the model and image processor.
-        """
-        self.model = DeformableDetrForObjectDetection.from_pretrained(load_dir, local_files_only=True)
-        self.image_processor = DeformableDetrFeatureExtractor.from_pretrained(load_dir, local_files_only=True)
-        logging_utils.get_logger().info(f"Model and image processor loaded from {load_dir}")
-
-    def apply_lora(
-        self,
-        adapter_config: Dict,
-    ):
-        """
-        Applies Low-Rank Adaptation (LoRA) to the model.
+        Applies Low-Rank Adaptation (LoRA) to the Deformable DETR model.
 
         Args:
             adapter_config (Dict): Configuration dictionary for LoRA adapters.
 
         Note:
-            This method is a placeholder. Implement LoRA integration as needed, possibly using HuggingFace's
-            adapters library or other PEFT techniques.
+            This method requires HuggingFace's adapters library to be installed and configured.
         """
-        # Placeholder for applying LoRA adapters
-        raise NotImplementedError("LoRA application not implemented yet.")
+        try:
+            from transformers.adapters import AdapterConfig, LoRAConfig
+            self.model.add_adapter("lora_adapter", config=LoRAConfig(**adapter_config))
+            self.model.train_adapter("lora_adapter")
+            self.logger.info("LoRA adapter applied successfully.")
+        except ImportError:
+            self.logger.error("HuggingFace adapters library is not installed.")
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to apply LoRA adapter: {e}")
+            raise
 
-    def integrate_qulora(
-        self,
-        adapter_config: Dict,
-    ):
+    def integrate_qulora(self, adapter_config: Dict):
         """
-        Integrates Quantized LoRA (QLoRA) into the model.
+        Integrates Quantized LoRA (QLoRA) into the Deformable DETR model.
 
         Args:
             adapter_config (Dict): Configuration dictionary for QLoRA adapters.
 
         Note:
-            This method is a placeholder. Implement QLoRA integration as needed, possibly using specialized
-            libraries or custom implementations.
+            This method requires specialized libraries or custom implementations for QLoRA.
         """
         # Placeholder for integrating QLoRA
         raise NotImplementedError("QLoRA integration not implemented yet.")
+
+"""
+# Example Usage
+if __name__ == "__main__":
+    from src.utils import config_parser  # Assuming config_parser is defined appropriately
+
+    # Path to the configuration file
+    config_file_path = "configs/deformable_detr.yaml"
+
+    # Initialize the Deformable DETR model
+    deformable_detr = DeformableDetrModel(
+        model_name_or_path="SenseTime/deformable-detr",
+        config=config_file_path,
+        num_labels=91,  # COCO has 80 classes + background
+        device="cuda" if torch.cuda.is_available() else "cpu"
+    )
+
+    # Example inference
+    import requests
+    from PIL import Image
+
+    image_url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+    image = Image.open(requests.get(image_url, stream=True).raw)
+
+    predictions = deformable_detr.predict(images=[image], threshold=0.5, top_k=100)
+    for pred in predictions:
+        for score, label, box in zip(pred["scores"], pred["labels"], pred["boxes"]):
+            print(
+                f"Detected {deformable_detr.config.id2label[label]} with confidence "
+                f"{round(score, 3)} at location {box}"
+            )
+"""

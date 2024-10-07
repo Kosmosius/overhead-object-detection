@@ -1,37 +1,69 @@
 # configs/models/vitdet.yaml
 
 # Configuration for the ViTDet (Vision Transformer for Detection) model.
-# This configuration is based on the VitDetConfig class from Hugging Face Transformers.
+# This configuration follows Hugging Face's best practices and is based on the VitDetConfig class.
 
-# Model architecture parameters
-hidden_size: 768                  # Dimensionality of the encoder layers and the pooler layer.
-num_hidden_layers: 12             # Number of hidden layers in the Transformer encoder.
-num_attention_heads: 12           # Number of attention heads for each attention layer in the Transformer encoder.
-mlp_ratio: 4                      # Ratio of MLP hidden dimension to embedding dimension.
-hidden_act: "gelu"                # Non-linear activation function in the encoder and pooler. Options: "gelu", "relu", "selu", "gelu_new".
-dropout_prob: 0.0                 # Dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
-initializer_range: 0.02           # Standard deviation of the truncated_normal_initializer for initializing all weight matrices.
-layer_norm_eps: 1e-06             # Epsilon value used by layer normalization layers.
+# ------------------------------------------------------------------------------
+# Model Architecture Parameters
+# ------------------------------------------------------------------------------
+model:
+  type: "VitDet"  # Model type identifier
+  hidden_size: 768  # Dimensionality of the encoder layers and the pooler layer.
+  num_hidden_layers: 12  # Number of hidden layers in the Transformer encoder.
+  num_attention_heads: 12  # Number of attention heads for each attention layer in the Transformer encoder.
+  mlp_ratio: 4  # Ratio of MLP hidden dimension to embedding dimension.
+  hidden_act: "gelu"  # Activation function in the encoder and pooler. Options: "gelu", "relu", "selu", "gelu_new".
+  dropout_prob: 0.0  # Dropout probability for all fully connected layers in embeddings, encoder, and pooler.
+  initializer_range: 0.02  # Standard deviation for weight initialization.
+  layer_norm_eps: 1e-06  # Epsilon value for layer normalization layers.
 
-# Image and patch parameters
-image_size: 224                   # Size (resolution) of each input image.
-pretrain_image_size: 224          # Size (resolution) of each image during pretraining.
-patch_size: 16                    # Size (resolution) of each image patch.
-num_channels: 3                   # Number of input image channels (e.g., 3 for RGB).
+# ------------------------------------------------------------------------------
+# Image and Patch Parameters
+# ------------------------------------------------------------------------------
+image:
+  image_size: 224  # Size (resolution) of each input image.
+  pretrain_image_size: 224  # Size (resolution) during pretraining.
+  patch_size: 16  # Size (resolution) of each image patch.
+  num_channels: 3  # Number of input image channels (e.g., 3 for RGB).
 
-# Attention and positional embedding parameters
-qkv_bias: true                    # Whether to add a bias term to the queries, keys, and values in attention layers.
-drop_path_rate: 0.0               # Stochastic depth rate for regularization.
-window_block_indices: []          # List of block indices that should use window attention instead of global self-attention.
-residual_block_indices: []        # List of block indices that should have an extra residual block after the MLP.
-use_absolute_position_embeddings: true  # Whether to add absolute position embeddings to the patch embeddings.
-use_relative_position_embeddings: false  # Whether to add relative position embeddings to the attention maps.
-window_size: 0                    # Size of the attention window. Set to 0 for global attention.
+# ------------------------------------------------------------------------------
+# Attention and Positional Embedding Parameters
+# ------------------------------------------------------------------------------
+attention:
+  qkv_bias: true  # Whether to add a bias to the queries, keys, and values.
+  drop_path_rate: 0.0  # Stochastic depth rate for regularization.
+  window_size: 0  # Size of the attention window. Set to 0 for global attention.
+  
+  # Indices of blocks using window attention and residual blocks
+  window_block_indices: []  # List of block indices that should use window attention.
+  residual_block_indices: []  # List of block indices that should have an extra residual block after the MLP.
+  
+  # Positional Embedding Configuration
+  positional_embeddings:
+    use_absolute: true  # Whether to use absolute position embeddings.
+    use_relative: false  # Whether to use relative position embeddings.
 
-# Output feature configuration
-out_features: null                # List of feature names to output. If null, defaults to the last stage.
-out_indices: null                 # List of feature indices to output. If null, defaults to the last stage.
+# ------------------------------------------------------------------------------
+# Output Feature Configuration
+# ------------------------------------------------------------------------------
+output:
+  out_features: null  # List of feature names to output. If null, defaults to the last stage.
+  out_indices: null  # List of feature indices to output. If null, defaults to the last stage.
 
-# Additional parameters (if any) can be added below
+# ------------------------------------------------------------------------------
+# Training Configuration (Optional)
+# ------------------------------------------------------------------------------
+training:
+  learning_rate: 1e-4  # Learning rate for the optimizer.
+  weight_decay: 0.01  # Weight decay coefficient.
+  batch_size: 8  # Batch size for training.
+  num_epochs: 10  # Number of training epochs.
+  num_warmup_steps: 0  # Number of warmup steps for the scheduler.
+  log_interval: 10  # Interval (in steps) for logging training progress.
+  
+# ------------------------------------------------------------------------------
+# Additional Parameters
+# ------------------------------------------------------------------------------
+# Add any additional parameters below as needed.
 # Example:
 # some_new_parameter: value

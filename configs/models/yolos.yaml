@@ -3,51 +3,57 @@
 # YOLOS Model Configuration
 # This configuration file defines the parameters for initializing the YOLOS model.
 # It is based on the "hustvl/yolos-base" architecture and can be customized as needed.
+# Adheres to Hugging Face's configuration standards and best practices.
 
 model:
-  type: "YolosForObjectDetection"  # Specifies the type of model to instantiate
-  pretrained_model_name_or_path: "hustvl/yolos-base"  # Hugging Face model identifier or local path
+  # Pretrained model identifier from Hugging Face or local path
+  pretrained_model_name_or_path: "hustvl/yolos-base"
+
   config:
+    # Model architecture parameters
     hidden_size: 768  # Dimensionality of the encoder layers and the pooler layer
     num_hidden_layers: 12  # Number of hidden layers in the Transformer encoder
     num_attention_heads: 12  # Number of attention heads for each attention layer in the Transformer encoder
-    intermediate_size: 3072  # Dimensionality of the “intermediate” (i.e., feed-forward) layer in the Transformer encoder
+    intermediate_size: 3072  # Dimensionality of the feed-forward layer in the Transformer encoder
     hidden_act: "gelu"  # Non-linear activation function in the encoder and pooler
-    hidden_dropout_prob: 0.0  # Dropout probability for all fully connected layers in the embeddings, encoder, and pooler
-    attention_probs_dropout_prob: 0.0  # Dropout ratio for the attention probabilities
-    initializer_range: 0.02  # Standard deviation of the truncated_normal_initializer for initializing all weight matrices
-    layer_norm_eps: 1e-12  # Epsilon used by the layer normalization layers
-    image_size:
-      height: 512  # Height of the input images
-      width: 864  # Width of the input images
+    hidden_dropout_prob: 0.0  # Dropout probability for fully connected layers in embeddings, encoder, and pooler
+    attention_probs_dropout_prob: 0.0  # Dropout ratio for attention probabilities
+    initializer_range: 0.02  # Std deviation for truncated_normal_initializer for initializing weights
+    layer_norm_eps: 1e-12  # Epsilon used by layer normalization layers
+
+    # Image preprocessing parameters
+    image_size: [512, 864]  # Size of input images as [height, width]
     patch_size: 16  # Size of each image patch
     num_channels: 3  # Number of input channels (e.g., RGB)
-    qkv_bias: true  # Whether to add a bias to the queries, keys, and values
+    qkv_bias: true  # Whether to add bias to queries, keys, and values
     num_detection_tokens: 100  # Number of detection tokens
     use_mid_position_embeddings: true  # Whether to use mid-layer position encodings
     auxiliary_loss: false  # Whether to use auxiliary decoding losses
-    class_cost: 1.0  # Relative weight of the classification error in the Hungarian matching cost
-    bbox_cost: 5.0  # Relative weight of the L1 error of the bounding box coordinates in the Hungarian matching cost
-    giou_cost: 2.0  # Relative weight of the generalized IoU loss of the bounding box in the Hungarian matching cost
-    bbox_loss_coefficient: 5.0  # Relative weight of the L1 bounding box loss in the object detection loss
-    giou_loss_coefficient: 2.0  # Relative weight of the generalized IoU loss in the object detection loss
-    eos_coefficient: 0.1  # Relative classification weight of the ‘no-object’ class in the object detection loss
 
-  image_processor:
-    type: "YolosImageProcessor"  # Specifies the type of image processor to instantiate
-    config:
-      format: "coco_detection"  # Data format of the annotations
-      do_resize: true  # Whether to resize the image
-      size:
-        shortest_edge: 800  # Shortest edge length after resizing
-        longest_edge: 1333  # Longest edge length after resizing
-      resample: "BILINEAR"  # Resampling filter to use when resizing the image
-      do_rescale: true  # Whether to rescale the image
-      rescale_factor: 0.00392156862745098  # Scale factor for rescaling the image
-      do_normalize: true  # Whether to normalize the image
-      image_mean: [0.485, 0.456, 0.406]  # Mean values for normalization
-      image_std: [0.229, 0.224, 0.225]  # Standard deviation values for normalization
-      do_pad: true  # Whether to pad the image
-      pad_size: null  # Size to pad the image to; if null, pads to the maximum size in the batch
+    # Hungarian matching cost coefficients
+    class_cost: 1.0  # Relative weight of classification error in Hungarian matching cost
+    bbox_cost: 5.0  # Relative weight of L1 error of bounding box coordinates in Hungarian matching cost
+    giou_cost: 2.0  # Relative weight of generalized IoU loss of bounding box in Hungarian matching cost
+
+    # Object detection loss coefficients
+    bbox_loss_coefficient: 5.0  # Relative weight of L1 bounding box loss in object detection loss
+    giou_loss_coefficient: 2.0  # Relative weight of generalized IoU loss in object detection loss
+    eos_coefficient: 0.1  # Relative classification weight of 'no-object' class in object detection loss
+
+image_processor:
+  # Image processing parameters specific to YOLOS
+  format: "coco_detection"  # Data format of the annotations ("coco_detection" or "coco_panoptic")
+  do_resize: true  # Whether to resize the image
+  size:
+    shortest_edge: 800  # Shortest edge length after resizing
+    longest_edge: 1333  # Longest edge length after resizing
+  resample: "bilinear"  # Resampling filter to use when resizing the image (options: "nearest", "bilinear", "bicubic", etc.)
+  do_rescale: true  # Whether to rescale the image
+  rescale_factor: 0.00392156862745098  # Scale factor for rescaling the image (1/255)
+  do_normalize: true  # Whether to normalize the image
+  image_mean: [0.485, 0.456, 0.406]  # Mean values for normalization (typically ImageNet means)
+  image_std: [0.229, 0.224, 0.225]  # Standard deviation values for normalization (typically ImageNet stds)
+  do_pad: true  # Whether to pad the image
+  pad_size: null  # Size to pad the image to; if null, pads to the maximum size in the batch
 
 # End of yolos.yaml

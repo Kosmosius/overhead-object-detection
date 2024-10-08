@@ -1,342 +1,227 @@
 # src/models/zoo/base_model.py
 
-import os
 import logging
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Union, Type, List
+from typing import Optional, Any, Dict, Union
 
 import torch
 from torch import nn
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import _LRScheduler
 from transformers import (
-    PreTrainedModel,
     AutoConfig,
-    AutoModel,
+    AutoModelForObjectDetection,
+    AutoModelForImageClassification,
+    AutoModelForSemanticSegmentation,
     AutoImageProcessor,
-    get_linear_schedule_with_warmup,
+    AutoFeatureExtractor,
+    PreTrainedModel,
 )
 
-from src.utils.logging_utils import get_logger
+logger = logging.getLogger(__name__)
 
-logger = get_logger(__name__)
 
-class BaseModel(ABC, nn.Module):
+class BaseModel(nn.Module):
     """
-    An abstract base class for object detection models in the model zoo.
-    This class defines common interfaces and utilities for initializing,
-    training, and evaluating models using the Hugging Face Transformers library.
+    A base class for models, providing common utilities and leveraging HuggingFace Transformers to the maximum extent.
     """
 
     def __init__(
         self,
         model_name_or_path: str,
-        model_class: Optional[Type[PreTrainedModel]] = None,
-        config: Optional[Union[Dict[str, Any], str]] = None,
+        task_type: str,
         num_labels: Optional[int] = None,
-        **kwargs,
+        label2id: Optional[Dict[str, int]] = None,
+        id2label: Optional[Dict[int, str]] = None,
+        config_kwargs: Optional[Dict[str, Any]] = None,
+        model_kwargs: Optional[Dict[str, Any]] = None,
+        device: Optional[Union[str, torch.device]] = None,
     ):
         """
-        Initializes the base model with the given configuration.
+        Initializes the BaseModel with a HuggingFace PreTrainedModel.
 
         Args:
-            model_name_or_path (str): Path to the pretrained model or model identifier from Hugging Face.
-            model_class (Optional[Type[PreTrainedModel]]): Specific model class to instantiate.
-            config (Union[Dict[str, Any], str], optional): Configuration dictionary or path to config file.
-            num_labels (int, optional): Number of labels for object detection.
-            **kwargs: Additional keyword arguments for model configuration.
+            model_name_or_path (str): Path to the pretrained model or model identifier from HuggingFace.
+            task_type (str): Type of task ('object_detection', 'image_classification', 'semantic_segmentation').
+            num_labels (int, optional): Number of labels/classes for the task.
+            label2id (Dict[str, int], optional): Mapping from label names to IDs.
+            id2label (Dict[int, str], optional): Mapping from IDs to label names.
+            config_kwargs (Dict[str, Any], optional): Additional keyword arguments for configuration.
+            model_kwargs (Dict[str, Any], optional): Additional keyword arguments for model instantiation.
+            device (Union[str, torch.device], optional): Device to run the model on.
         """
         super().__init__()
         self.model_name_or_path = model_name_or_path
-        self.model_class = model_class
+        self.task_type = task_type
         self.num_labels = num_labels
-        self.load_kwargs = kwargs
+        self.label2id = label2id
+        self.id2label = id2label
+        self.config_kwargs = config_kwargs or {}
+        self.model_kwargs = model_kwargs or {}
+        self.device = torch.device(device if device else 'cpu')
 
         # Load configuration
-        if config is None:
-            self.config = AutoConfig.from_pretrained(
-                self.model_name_or_path,
-                num_labels=self.num_labels,
-                **kwargs,
-            )
-            self.logger = get_logger(f"{self.__class__.__name__}.config")
-        elif isinstance(config, dict):
-            self.config = AutoConfig.from_dict(config)
-            self.logger = get_logger(f"{self.__class__.__name__}.config")
-        else:
-            self.config = AutoConfig.from_pretrained(
-                config,
-                num_labels=self.num_labels,
-                **kwargs,
-            )
-            self.logger = get_logger(f"{self.__class__.__name__}.config")
+        self.config = AutoConfig.from_pretrained(
+            self.model_name_or_path,
+            num_labels=self.num_labels,
+            label2id=self.label2id,
+            id2label=self.id2label,
+            **self.config_kwargs,
+        )
+        logger.info(f"Configuration loaded for model '{self.model_name_or_path}'.")
 
-        # Initialize the model
-        self.model = self._load_model(self.model_class)
+        # Load model
+        self.model = self._load_model()
+        self.model.to(self.device)
+        logger.info(f"Model '{self.model_name_or_path}' loaded and moved to device '{self.device}'.")
 
-        # Initialize the feature extractor
-        self.feature_extractor = self._load_feature_extractor()
+        # Load processor
+        self.processor = self._load_processor()
 
-    def _load_model(self, model_class: Optional[Type[PreTrainedModel]] = None) -> PreTrainedModel:
+    def _load_model(self) -> PreTrainedModel:
         """
-        Loads a pretrained model from Hugging Face.
-
-        Args:
-            model_class (Optional[Type[PreTrainedModel]]): Specific model class to instantiate.
+        Loads the appropriate model based on the task type.
 
         Returns:
             PreTrainedModel: The loaded model.
         """
-        if model_class is None:
-            model_class = AutoModel
         try:
-            model = model_class.from_pretrained(
-                self.model_name_or_path,
-                config=self.config,
-                **self.load_kwargs,
-            )
-            self.logger.info(f"Loaded model from {self.model_name_or_path} using {model_class.__name__}")
+            if self.task_type == 'object_detection':
+                model = AutoModelForObjectDetection.from_pretrained(
+                    self.model_name_or_path,
+                    config=self.config,
+                    **self.model_kwargs,
+                )
+                logger.info(f"Loaded AutoModelForObjectDetection for '{self.model_name_or_path}'.")
+            elif self.task_type == 'image_classification':
+                model = AutoModelForImageClassification.from_pretrained(
+                    self.model_name_or_path,
+                    config=self.config,
+                    **self.model_kwargs,
+                )
+                logger.info(f"Loaded AutoModelForImageClassification for '{self.model_name_or_path}'.")
+            elif self.task_type == 'semantic_segmentation':
+                model = AutoModelForSemanticSegmentation.from_pretrained(
+                    self.model_name_or_path,
+                    config=self.config,
+                    **self.model_kwargs,
+                )
+                logger.info(f"Loaded AutoModelForSemanticSegmentation for '{self.model_name_or_path}'.")
+            else:
+                logger.error(f"Unsupported task type '{self.task_type}'.")
+                raise ValueError(f"Unsupported task type '{self.task_type}'.")
             return model
-        except EnvironmentError as e:
-            self.logger.error(f"Environment error during model loading: {e}")
-            raise
-        except ValueError as e:
-            self.logger.error(f"Value error during model loading: {e}")
-            raise
         except Exception as e:
-            self.logger.error(f"Unexpected error during model loading: {e}")
+            logger.error(f"Failed to load model '{self.model_name_or_path}': {e}")
             raise
 
-    def _load_feature_extractor(self) -> Union[AutoImageProcessor, Any]:
+    def _load_processor(self):
         """
-        Loads the appropriate feature extractor or image processor.
+        Loads the appropriate image processor or feature extractor.
 
         Returns:
             AutoImageProcessor or AutoFeatureExtractor: The loaded processor.
         """
         try:
             processor = AutoImageProcessor.from_pretrained(self.model_name_or_path)
-            self.logger.info("Loaded AutoImageProcessor")
-        except ValueError:
-            processor = AutoImageProcessor.from_pretrained(
-                self.model_name_or_path, 
-                trust_remote_code=True  # If necessary for custom processors
-            )
-            self.logger.info("Loaded AutoImageProcessor as fallback")
+            logger.info(f"Loaded AutoImageProcessor for '{self.model_name_or_path}'.")
+        except Exception as e_image_processor:
+            logger.debug(f"AutoImageProcessor not found: {e_image_processor}")
+            try:
+                processor = AutoFeatureExtractor.from_pretrained(self.model_name_or_path)
+                logger.info(f"Loaded AutoFeatureExtractor for '{self.model_name_or_path}'.")
+            except Exception as e_feature_extractor:
+                logger.error(f"Failed to create processor: {e_feature_extractor}")
+                raise RuntimeError(
+                    f"Could not load processor for '{self.model_name_or_path}'. "
+                    f"Errors: {e_image_processor}, {e_feature_extractor}"
+                )
         return processor
 
-    @abstractmethod
     def forward(self, *args, **kwargs):
         """
-        Defines the forward pass of the model.
-        Must be implemented by subclasses.
-        """
-        pass
-
-    @abstractmethod
-    def compute_loss(self, outputs, targets) -> torch.Tensor:
-        """
-        Computes the loss given model outputs and targets.
-        Must be implemented by subclasses.
+        Forward pass of the model.
 
         Args:
-            outputs: Outputs from the model.
-            targets: Ground truth targets.
+            *args: Positional arguments for the model's forward method.
+            **kwargs: Keyword arguments for the model's forward method.
 
         Returns:
-            torch.Tensor: The computed loss.
+            Any: The output of the model's forward method.
         """
-        pass
+        return self.model(*args, **kwargs)
 
     def save(self, save_directory: str):
         """
-        Saves the model and configuration to the specified directory.
+        Saves the model and processor to the specified directory.
 
         Args:
-            save_directory (str): Directory to save the model and config.
+            save_directory (str): Directory to save the model and processor.
         """
-        os.makedirs(save_directory, exist_ok=True)
-        try:
-            self.model.save_pretrained(save_directory)
-            self.config.save_pretrained(save_directory)
-            self.feature_extractor.save_pretrained(save_directory)
-            self.logger.info(f"Model, config, and feature extractor saved to {save_directory}")
-        except Exception as e:
-            self.logger.error(f"Failed to save model components: {e}")
-            raise
+        self.model.save_pretrained(save_directory)
+        self.processor.save_pretrained(save_directory)
+        logger.info(f"Model and processor saved to {save_directory}.")
 
     @classmethod
-    def load(cls, load_directory: str, model_class: Optional[Type[PreTrainedModel]] = None, **kwargs):
+    def load(cls, load_directory: str, task_type: str, device: Optional[Union[str, torch.device]] = None):
         """
-        Loads the model and configuration from the specified directory.
+        Loads the model and processor from the specified directory.
 
         Args:
-            load_directory (str): Directory from which to load the model and config.
-            model_class (Optional[Type[PreTrainedModel]]): Specific model class to instantiate.
+            load_directory (str): Directory from which to load the model and processor.
+            task_type (str): Type of task ('object_detection', 'image_classification', 'semantic_segmentation').
+            device (Union[str, torch.device], optional): Device to run the model on.
 
         Returns:
             BaseModel: An instance of the model.
         """
         return cls(
             model_name_or_path=load_directory,
-            model_class=model_class,
-            config=load_directory,
-            **kwargs,
+            task_type=task_type,
+            device=device,
         )
 
-    def to_device(self, device: Union[str, torch.device]):
+    def to(self, device: Union[str, torch.device]):
         """
         Moves the model to the specified device.
 
         Args:
             device (Union[str, torch.device]): The device to move the model to.
+        """
+        self.device = torch.device(device)
+        self.model.to(self.device)
+        logger.info(f"Model moved to device '{self.device}'.")
+
+    def get_parameters(self) -> Dict[str, torch.Tensor]:
+        """
+        Returns the model's parameters.
 
         Returns:
-            BaseModel: The model on the specified device.
+            Dict[str, torch.Tensor]: The model's parameters.
         """
-        self.model.to(device)
-        self.feature_extractor.to(device)
-        self.logger.info(f"Moved model and feature extractor to {device}")
-        return self
+        return self.model.state_dict()
 
-    def train_model(self, mode: bool = True):
+    def load_parameters(self, state_dict: Dict[str, torch.Tensor]):
         """
-        Sets the model to training or evaluation mode.
+        Loads parameters into the model.
 
         Args:
-            mode (bool): True for training mode, False for evaluation mode.
-
-        Returns:
-            BaseModel: The model in the specified mode.
+            state_dict (Dict[str, torch.Tensor]): The state dictionary to load.
         """
-        self.model.train(mode)
-        self.feature_extractor.train(mode)
-        self.logger.info(f"Set model and feature extractor to {'train' if mode else 'eval'} mode")
-        return self
+        self.model.load_state_dict(state_dict)
+        logger.info("Model parameters loaded.")
 
-    def get_optimizer(
-        self,
-        optimizer_class: Type[Optimizer] = torch.optim.AdamW,
-        optimizer_params: Optional[Dict[str, Any]] = None
-    ) -> Optimizer:
+    def freeze_backbone(self):
         """
-        Creates an optimizer for the model parameters.
-
-        Args:
-            optimizer_class (Type[Optimizer], optional): Optimizer class to use. Defaults to torch.optim.AdamW.
-            optimizer_params (Optional[Dict[str, Any]], optional): Parameters for the optimizer. Defaults to None.
-
-        Returns:
-            Optimizer: An instance of the optimizer.
+        Freezes the backbone parameters to prevent them from being updated during training.
         """
-        optimizer_params = optimizer_params or {"lr": 1e-4, "weight_decay": 0.01}
-        optimizer = optimizer_class(self.parameters(), **optimizer_params)
-        self.logger.info(f"Initialized optimizer: {optimizer_class.__name__} with params: {optimizer_params}")
-        return optimizer
+        for name, param in self.model.named_parameters():
+            if 'backbone' in name or 'body' in name:
+                param.requires_grad = False
+        logger.info("Backbone parameters have been frozen.")
 
-    def get_scheduler(
-        self,
-        optimizer: Optimizer,
-        scheduler_class: Type[_LRScheduler] = get_linear_schedule_with_warmup,
-        scheduler_params: Optional[Dict[str, Any]] = None
-    ) -> _LRScheduler:
+    def unfreeze_backbone(self):
         """
-        Creates a learning rate scheduler.
-
-        Args:
-            optimizer (Optimizer): The optimizer for which to schedule the learning rate.
-            scheduler_class (Type[_LRScheduler], optional): Scheduler class to use. Defaults to get_linear_schedule_with_warmup.
-            scheduler_params (Optional[Dict[str, Any]], optional): Parameters for the scheduler. Defaults to None.
-
-        Returns:
-            _LRScheduler: A learning rate scheduler instance.
+        Unfreezes the backbone parameters to allow them to be updated during training.
         """
-        scheduler_params = scheduler_params or {}
-        scheduler = scheduler_class(optimizer, **scheduler_params)
-        self.logger.info(f"Initialized scheduler: {scheduler_class.__name__} with params: {scheduler_params}")
-        return scheduler
-
-    def prepare_inputs(self, inputs: Dict[str, Any]) -> Dict[str, torch.Tensor]:
-        """
-        Prepares inputs for the model, including preprocessing and moving to device.
-
-        Args:
-            inputs (Dict[str, Any]): A dictionary of inputs.
-
-        Returns:
-            Dict[str, torch.Tensor]: A dictionary of processed inputs.
-        """
-        device = next(self.model.parameters()).device
-        processed_inputs = {
-            k: v.to(device) if isinstance(v, torch.Tensor) else v
-            for k, v in inputs.items()
-        }
-        self.logger.debug(f"Prepared inputs moved to {device}")
-        return processed_inputs
-
-    def training_step(
-        self, 
-        batch: Dict[str, Any], 
-        optimizer: Optimizer, 
-        scaler: Optional[torch.cuda.amp.GradScaler] = None,
-        use_amp: bool = False
-    ) -> float:
-        """
-        Performs a single training step.
-
-        Args:
-            batch (Dict[str, Any]): A batch of data.
-            optimizer (Optimizer): The optimizer to use.
-            scaler (Optional[torch.cuda.amp.GradScaler], optional): Gradient scaler for mixed precision. Defaults to None.
-            use_amp (bool, optional): Whether to use mixed precision. Defaults to False.
-
-        Returns:
-            float: The loss value for this step.
-        """
-        self.train_model(True)
-        inputs = self.prepare_inputs(batch)
-        optimizer.zero_grad()
-        
-        if scaler and use_amp:
-            with torch.cuda.amp.autocast():
-                outputs = self(**inputs)
-                loss = self.compute_loss(outputs, inputs.get('labels'))
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            outputs = self(**inputs)
-            loss = self.compute_loss(outputs, inputs.get('labels'))
-            loss.backward()
-            optimizer.step()
-        
-        loss_value = loss.item()
-        self.logger.debug(f"Training step completed with loss: {loss_value}")
-        return loss_value
-
-    def evaluation_step(self, batch: Dict[str, Any]) -> Any:
-        """
-        Performs a single evaluation step.
-
-        Args:
-            batch (Dict[str, Any]): A batch of data.
-
-        Returns:
-            Any: The outputs from the model.
-        """
-        self.train_model(False)
-        inputs = self.prepare_inputs(batch)
-        with torch.no_grad():
-            outputs = self(**inputs)
-        self.logger.debug("Evaluation step completed")
-        return outputs
-
-    def fit(
-        self,
-        train_dataloader: torch.utils.data.DataLoader,
-        val_dataloader: Optional[torch.utils.data.DataLoader] = None,
-        epochs: int = 1,
-        optimizer_class: Type[Optimizer] = torch.optim.AdamW,
-        optimizer_params: Optional[Dict[str, Any]] = None,
-        scheduler_class: Type[_LRScheduler] = get_linear_schedule_with_warmup,
-        scheduler_params: Optional[Dict[str, Any]]
+        for name, param in self.model.named_parameters():
+            if 'backbone' in name or 'body' in name:
+                param.requires_grad = True
+        logger.info("Backbone parameters have been unfrozen.")

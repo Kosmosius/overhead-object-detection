@@ -1,370 +1,129 @@
 # src/models/model_factory.py
 
 import logging
-import os
-import json
-from typing import Type, Dict, Any, Optional
-from abc import ABC, abstractmethod
+from typing import Optional, Any, Dict
+
 from transformers import (
-    DetrForObjectDetection,
-    DetrConfig,
     AutoConfig,
+    AutoModelForObjectDetection,
+    AutoModelForImageClassification,
+    AutoModelForSemanticSegmentation,
     PreTrainedModel,
+    AutoFeatureExtractor,
+    AutoImageProcessor,
 )
-import torch
 
 logger = logging.getLogger(__name__)
 
-class BaseModel(ABC):
-    """
-    Abstract base class for object detection models.
-    """
-
-    def __init__(self, model_name: str, num_labels: int, model: PreTrainedModel = None, **kwargs):
-        """
-        Initialize the model with the given parameters.
-
-        Args:
-            model_name (str): Name of the pre-trained model or path to the model.
-            num_labels (int): Number of object classes.
-            model (PreTrainedModel, optional): A pre-loaded model instance.
-            **kwargs: Additional keyword arguments.
-        """
-        self.model_name = model_name
-        self.num_labels = num_labels
-        self.metadata = None  # Optional metadata
-
-        if model is not None:
-            self.model = model
-        else:
-            self.model = self._build_model(**kwargs)
-
-    @abstractmethod
-    def _build_model(self, **kwargs) -> PreTrainedModel:
-        """
-        Build and return the model instance.
-
-        Args:
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            PreTrainedModel: The initialized model.
-        """
-        pass
-
-    def save(self, save_directory: str, metadata: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Save the model to the specified directory, along with optional metadata.
-
-        Args:
-            save_directory (str): Directory to save the model.
-            metadata (Dict[str, Any], optional): Additional metadata to save with the model.
-        """
-        os.makedirs(save_directory, exist_ok=True)
-        self.model.save_pretrained(save_directory)
-        logger.info(f"Model saved to {save_directory}")
-
-        if metadata:
-            metadata_path = os.path.join(save_directory, 'metadata.json')
-            with open(metadata_path, 'w') as f:
-                json.dump(metadata, f, indent=4)
-            logger.info(f"Metadata saved to {metadata_path}")
-    
-    @classmethod
-    def load(cls, load_directory: str) -> 'BaseModel':
-        try:
-            config = AutoConfig.from_pretrained(load_directory)
-            model_type = config.model_type
-            model_class = MODEL_REGISTRY.get(model_type)
-            if not model_class:
-                raise ValueError(f"Model type '{model_type}' is not registered.")
-
-            # Call the load method of the specific model class
-            model = model_class.load(load_directory)
-            logger.info(f"Model loaded from {load_directory}")
-
-            metadata_path = os.path.join(load_directory, 'metadata.json')
-            if os.path.exists(metadata_path):
-                with open(metadata_path, 'r') as f:
-                    metadata = json.load(f)
-                logger.info(f"Metadata loaded from {metadata_path}")
-                model.metadata = metadata
-
-            return model
-        except Exception as e:
-            logger.error(f"Error loading model from {load_directory}: {e}")
-            raise e  # Re-raise the original exception
-
-    def freeze_backbone(self) -> None:
-        """
-        Freeze the backbone parameters to prevent them from being updated during training.
-        """
-        for name, param in self.model.named_parameters():
-            if any(backbone_layer in name for backbone_layer in ['backbone', 'body']):
-                param.requires_grad = False
-        logger.info("Backbone parameters have been frozen.")
-
-    def unfreeze_backbone(self) -> None:
-        """
-        Unfreeze the backbone parameters to allow them to be updated during training.
-        """
-        for name, param in self.model.named_parameters():
-            if any(backbone_layer in name for backbone_layer in ['backbone', 'body']):
-                param.requires_grad = True
-        logger.info("Backbone parameters have been unfrozen.")
-
-    def get_state_dict(self) -> Dict[str, Any]:
-        """
-        Get the state dictionary of the model.
-
-        Returns:
-            Dict[str, Any]: The state dictionary.
-        """
-        return self.model.state_dict()
-
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """
-        Load a state dictionary into the model.
-
-        Args:
-            state_dict (Dict[str, Any]): The state dictionary to load.
-        """
-        self.model.load_state_dict(state_dict)
-        logger.info("Model state dictionary loaded.")
-
-# Registry for available models
-MODEL_REGISTRY: Dict[str, Type[BaseModel]] = {}
-
-def register_model(name: str):
-    """
-    Decorator to register a new model class in the MODEL_REGISTRY.
-
-    Args:
-        name (str): Name of the model.
-    """
-    def decorator(cls):
-        if name in MODEL_REGISTRY:
-            raise ValueError(f"Model '{name}' is already registered.")
-        MODEL_REGISTRY[name] = cls
-        return cls
-    return decorator
-
-@register_model('detr')
-class DetrModel(BaseModel):
-    """
-    DETR (Detection Transformer) model implementation.
-    """
-
-    def _build_model(self, **kwargs) -> DetrForObjectDetection:
-        """
-        Build and return a DetrForObjectDetection model.
-
-        Args:
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            DetrForObjectDetection: The initialized DETR model.
-        """
-        try:
-            config = DetrConfig.from_pretrained(
-                self.model_name,
-                num_labels=self.num_labels,
-                **kwargs
-            )
-            model = DetrForObjectDetection.from_pretrained(
-                self.model_name,
-                config=config
-            )
-            logger.info(f"DETR model initialized with {self.num_labels} labels.")
-            return model
-        except Exception as e:
-            logger.error(f"Error initializing DETR model: {e}")
-            raise
-
-    @classmethod
-    def load(cls, load_directory: str) -> 'DetrModel':
-        """
-        Load a DetrModel from the specified directory.
-
-        Args:
-            load_directory (str): Directory to load the model from.
-
-        Returns:
-            DetrModel: An instance of DetrModel.
-        """
-        try:
-            model = DetrForObjectDetection.from_pretrained(load_directory)
-            num_labels = model.config.num_labels
-            instance = cls(
-                model_name=load_directory,
-                num_labels=num_labels,
-                model=model  # Pass the loaded model to avoid redundant loading
-            )
-            logger.info(f"DETR model loaded from {load_directory}")
-            return instance
-        except Exception as e:
-            logger.error(f"Error loading DETR model from {load_directory}: {e}")
-            raise
-
-# Additional models can be registered here using the @register_model decorator.
-
-class ModelVersioning:
-    """
-    Class to handle model versioning, saving, loading, and registry.
-    """
-
-    def __init__(self, model_dir: str = 'models'):
-        """
-        Initialize the ModelVersioning with a directory to store models.
-
-        Args:
-            model_dir (str): Directory to store model versions.
-        """
-        self.model_dir = model_dir
-        os.makedirs(self.model_dir, exist_ok=True)
-        self.registry_file = os.path.join(self.model_dir, 'model_registry.json')
-        self.registry = self._load_registry()
-
-    def _load_registry(self) -> Dict[str, Any]:
-        """
-        Load the model registry from a JSON file.
-
-        Returns:
-            Dict[str, Any]: The model registry.
-        """
-        if os.path.exists(self.registry_file):
-            with open(self.registry_file, 'r') as f:
-                registry = json.load(f)
-            logger.info("Model registry loaded.")
-        else:
-            registry = {}
-            logger.info("Model registry initialized.")
-        return registry
-
-    def _save_registry(self) -> None:
-        """
-        Save the model registry to a JSON file.
-        """
-        with open(self.registry_file, 'w') as f:
-            json.dump(self.registry, f, indent=4)
-        logger.info("Model registry saved.")
-
-    def register_model(
-        self,
-        model_name: str,
-        model_instance: BaseModel,
-        version: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """
-        Register a new model version.
-
-        Args:
-            model_name (str): Name of the model type.
-            model_instance (BaseModel): The model instance to save.
-            version (str): Version identifier (e.g., semantic versioning).
-            metadata (Dict[str, Any], optional): Additional metadata.
-        """
-        model_path = os.path.join(self.model_dir, f"{model_name}_{version}")
-        model_instance.save(model_path, metadata=metadata)
-
-        # Update registry
-        self.registry.setdefault(model_name, {})
-        self.registry[model_name][version] = {
-            'path': model_path,
-            'metadata': metadata or {}
-        }
-        self._save_registry()
-        logger.info(f"Model '{model_name}' version '{version}' registered.")
-
-    def load_model(self, model_name: str, version: str) -> BaseModel:
-        """
-        Load a specific version of a model.
-
-        Args:
-            model_name (str): Name of the model type.
-            version (str): Version identifier.
-
-        Returns:
-            BaseModel: An instance of the loaded model.
-        """
-        model_info = self.registry.get(model_name, {}).get(version)
-        if not model_info:
-            raise ValueError(f"Model '{model_name}' version '{version}' not found in registry.")
-
-        model_path = model_info['path']
-        # Use BaseModel.load to automatically determine the correct model class
-        model_instance = BaseModel.load(model_path)
-        logger.info(f"Model '{model_name}' version '{version}' loaded.")
-        return model_instance
-
-    def delete_model(self, model_name: str, version: str) -> None:
-        """
-        Delete a specific version of a model.
-
-        Args:
-            model_name (str): Name of the model type.
-            version (str): Version identifier.
-        """
-        model_info = self.registry.get(model_name, {}).pop(version, None)
-        if not model_info:
-            raise ValueError(f"Model '{model_name}' version '{version}' not found in registry.")
-
-        # Delete model files
-        model_path = model_info['path']
-        if os.path.exists(model_path):
-            import shutil
-            shutil.rmtree(model_path)
-            logger.info(f"Model files at '{model_path}' deleted.")
-
-        self._save_registry()
-        logger.info(f"Model '{model_name}' version '{version}' deleted from registry.")
-
-    def list_models(self) -> Dict[str, Any]:
-        """
-        List all registered models and their versions.
-
-        Returns:
-            Dict[str, Any]: Dictionary of models and versions.
-        """
-        return self.registry
 
 class ModelFactory:
     """
-    Factory class to build, manage, and version models.
+    Factory class to create models for different tasks using HuggingFace's AutoModel classes.
     """
 
     @staticmethod
     def create_model(
-        model_type: str,
-        model_name: str,
-        num_labels: int,
-        **kwargs
-    ) -> BaseModel:
+        model_name_or_path: str,
+        task_type: str,
+        num_labels: Optional[int] = None,
+        label2id: Optional[Dict[str, int]] = None,
+        id2label: Optional[Dict[int, str]] = None,
+        config_kwargs: Optional[Dict[str, Any]] = None,
+        model_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> PreTrainedModel:
         """
-        Create a model of the specified type.
+        Creates a model using HuggingFace's AutoModel classes.
 
         Args:
-            model_type (str): Type of the model to create.
-            model_name (str): Name of the pre-trained model.
-            num_labels (int): Number of object classes.
-            **kwargs: Additional keyword arguments.
+            model_name_or_path (str): Path to the pretrained model or model identifier from HuggingFace.
+            task_type (str): Type of task ('object_detection', 'image_classification', 'semantic_segmentation').
+            num_labels (int, optional): Number of labels/classes for the task.
+            label2id (Dict[str, int], optional): Mapping from label names to IDs.
+            id2label (Dict[int, str], optional): Mapping from IDs to label names.
+            config_kwargs (Dict[str, Any], optional): Additional keyword arguments for configuration.
+            model_kwargs (Dict[str, Any], optional): Additional keyword arguments for model instantiation.
 
         Returns:
-            BaseModel: An instance of a model subclass.
+            PreTrainedModel: A HuggingFace model instance.
+
+        Raises:
+            ValueError: If the task type is not supported.
         """
-        model_class = MODEL_REGISTRY.get(model_type)
-        if not model_class:
-            raise ValueError(f"Model type '{model_type}' is not registered.")
-        model = model_class(model_name=model_name, num_labels=num_labels, **kwargs)
-        return model
+        logger.info(f"Loading model '{model_name_or_path}' for task '{task_type}'.")
+
+        config_kwargs = config_kwargs or {}
+        model_kwargs = model_kwargs or {}
+
+        try:
+            # Load configuration with specified parameters
+            config = AutoConfig.from_pretrained(
+                model_name_or_path,
+                num_labels=num_labels,
+                label2id=label2id,
+                id2label=id2label,
+                **config_kwargs,
+            )
+            logger.debug(f"Configuration loaded: {config}")
+
+            # Select the appropriate AutoModel class based on task type
+            if task_type == 'object_detection':
+                model = AutoModelForObjectDetection.from_pretrained(
+                    model_name_or_path,
+                    config=config,
+                    **model_kwargs,
+                )
+                logger.info(f"Loaded AutoModelForObjectDetection for '{model_name_or_path}'.")
+            elif task_type == 'image_classification':
+                model = AutoModelForImageClassification.from_pretrained(
+                    model_name_or_path,
+                    config=config,
+                    **model_kwargs,
+                )
+                logger.info(f"Loaded AutoModelForImageClassification for '{model_name_or_path}'.")
+            elif task_type == 'semantic_segmentation':
+                model = AutoModelForSemanticSegmentation.from_pretrained(
+                    model_name_or_path,
+                    config=config,
+                    **model_kwargs,
+                )
+                logger.info(f"Loaded AutoModelForSemanticSegmentation for '{model_name_or_path}'.")
+            else:
+                logger.error(f"Unsupported task type '{task_type}'.")
+                raise ValueError(f"Unsupported task type '{task_type}'.")
+
+            return model
+
+        except Exception as e:
+            logger.error(f"Failed to create model '{model_name_or_path}' for task '{task_type}': {e}")
+            raise
 
     @staticmethod
-    def get_available_models() -> Dict[str, Type[BaseModel]]:
+    def create_processor(
+        model_name_or_path: str,
+    ) -> Any:
         """
-        Get a list of available registered model types.
+        Creates an image processor or feature extractor using HuggingFace's Auto classes.
+
+        Args:
+            model_name_or_path (str): Path to the pretrained model or model identifier from HuggingFace.
 
         Returns:
-            Dict[str, Type[BaseModel]]: Dictionary of registered model types.
+            AutoImageProcessor or AutoFeatureExtractor: An image processor instance.
         """
-        return MODEL_REGISTRY.copy()
+        try:
+            # Try to load AutoImageProcessor first
+            processor = AutoImageProcessor.from_pretrained(model_name_or_path)
+            logger.info(f"Loaded AutoImageProcessor for '{model_name_or_path}'.")
+        except Exception as e_image_processor:
+            logger.debug(f"AutoImageProcessor not found: {e_image_processor}")
+            try:
+                # Fallback to AutoFeatureExtractor
+                processor = AutoFeatureExtractor.from_pretrained(model_name_or_path)
+                logger.info(f"Loaded AutoFeatureExtractor for '{model_name_or_path}'.")
+            except Exception as e_feature_extractor:
+                logger.error(f"Failed to create processor: {e_feature_extractor}")
+                raise RuntimeError(
+                    f"Could not load processor for '{model_name_or_path}'. "
+                    f"Errors: {e_image_processor}, {e_feature_extractor}"
+                )
+        return processor

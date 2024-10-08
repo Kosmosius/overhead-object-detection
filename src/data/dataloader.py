@@ -1,255 +1,130 @@
 # src/data/dataloader.py
 
-import os
 import logging
-from torch.utils.data import DataLoader, Dataset
-from pycocotools.coco import COCO
-import cv2
+from typing import Optional, Dict, Any
+
+from datasets import load_dataset, DatasetDict
+from transformers import AutoImageProcessor
+from torch.utils.data import DataLoader
+from src.data.augmentation import DataAugmentation
 import torch
-from src.data.augmentation import DataAugmentor
-from typing import Callable, Optional, Tuple, List, Dict
-from albumentations.pytorch import ToTensorV2
 
-class CocoDataset(Dataset):
+logger = logging.getLogger(__name__)
+
+
+def get_datasets(
+    model_name_or_path: str,
+    dataset_name: str,
+    train_split: str = "train",
+    val_split: str = "validation",
+    cache_dir: Optional[str] = None,
+    augmentation: Optional[DataAugmentation] = None,
+    bbox_format: str = "coco",
+    remove_columns: Optional[list] = None,
+) -> DatasetDict:
     """
-    Custom Dataset class for the COCO dataset.
-    Returns images and annotations in a format compatible with HuggingFace Transformers,
-    and applies data augmentation if provided.
+    Loads and preprocesses the datasets using HuggingFace's datasets library.
+
+    Args:
+        model_name_or_path (str): Path to the pretrained model or model identifier from HuggingFace.
+        dataset_name (str): Name of the dataset to load.
+        train_split (str): Name of the training split.
+        val_split (str): Name of the validation split.
+        cache_dir (str, optional): Directory to cache the dataset.
+        augmentation (DataAugmentation, optional): Data augmentation to apply.
+        bbox_format (str): Format of the bounding boxes ('coco' or 'pascal_voc').
+        remove_columns (list, optional): List of columns to remove from the dataset.
+
+    Returns:
+        DatasetDict: A dictionary containing the training and validation datasets.
     """
+    # Load the datasets
+    datasets = load_dataset(
+        dataset_name,
+        split={"train": train_split, "validation": val_split},
+        cache_dir=cache_dir,
+    )
 
-    def __init__(
-        self,
-        img_dir: str,
-        ann_file: str,
-        transforms: Optional[DataAugmentor] = None,
-        feature_extractor: Optional[Callable] = None,
-    ):
-        """
-        Initialize the CocoDataset.
+    # Load the processor
+    processor = AutoImageProcessor.from_pretrained(model_name_or_path)
 
-        Args:
-            img_dir (str): Directory with all the images.
-            ann_file (str): Path to the annotation file.
-            transforms (DataAugmentor, optional): DataAugmentor instance for applying augmentations.
-            feature_extractor (Callable, optional): Feature extractor to preprocess images.
-        """
-        self.img_dir = img_dir
-        self.ann_file = ann_file
-        self.coco = COCO(ann_file)
-        self.image_ids = list(self.coco.imgs.keys())
-        self.transforms = transforms
-        self.feature_extractor = feature_extractor
+    def preprocess_function(examples):
+        images = [image.convert("RGB") for image in examples["image"]]
+        annotations = examples.get("annotations", None)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, Dict]:
-        image_id = self.image_ids[idx]
-        ann_ids = self.coco.getAnnIds(imgIds=image_id)
-        anns = self.coco.loadAnns(ann_ids)
-
-        # Load image
-        img_info = self.coco.imgs[image_id]
-        img_path = os.path.join(self.img_dir, img_info['file_name'])
-        image = cv2.imread(img_path)
-        if image is None:
-            raise FileNotFoundError(f"Image not found at path: {img_path}")
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # Get bounding boxes and category IDs
-        bboxes = [ann['bbox'] for ann in anns]
-        category_ids = [ann['category_id'] for ann in anns]
-
-        # Convert bounding boxes to [x_min, y_min, x_max, y_max] format
-        bboxes = self._convert_bbox_format(bboxes)
-
-        # Apply augmentations if provided
-        if self.transforms:
-            augmented = self.transforms.apply_augmentation(
-                image=image,
-                bboxes=bboxes,
-                category_ids=category_ids
+        # Apply augmentation if provided
+        if augmentation:
+            augmented = augmentation(
+                {
+                    "image": images,
+                    "annotations": annotations,
+                }
             )
-            image = augmented['image']
-            bboxes = augmented['bboxes']
-            category_ids = augmented['category_ids']
+            images = augmented["image"]
+            annotations = augmented["annotations"]
 
-        # Feature extractor processing
-        if self.feature_extractor is not None:
-            # Pass image as a list of NumPy arrays to the feature extractor
-            # Ensures compatibility with mocks and expected input types
-            image = self.feature_extractor(images=[image], return_tensors="pt")['pixel_values'].squeeze(0)
-        else:
-            # Convert image to tensor without unnecessary copying
-            # Use torch.from_numpy to avoid warnings and ensure efficient conversion
-            image = torch.from_numpy(image).permute(2, 0, 1).float()  # Shape: [C, H, W]
-
-        # Prepare target
-        target = {}
-        target['boxes'] = torch.tensor(bboxes, dtype=torch.float32)
-        target['labels'] = torch.tensor(category_ids, dtype=torch.int64)
-        target['image_id'] = torch.tensor([image_id])
-
-        return image, target
-
-    def __len__(self) -> int:
-        return len(self.image_ids)
-
-    def _convert_bbox_format(self, bboxes: List[List[float]]) -> List[List[float]]:
-        """
-        Convert bounding boxes from COCO format [x, y, width, height]
-        to [x_min, y_min, x_max, y_max] format.
-
-        Args:
-            bboxes (List[List[float]]): List of bounding boxes in COCO format.
-
-        Returns:
-            List[List[float]]: List of bounding boxes in [x_min, y_min, x_max, y_max] format.
-        """
-        converted_bboxes = []
-        for bbox in bboxes:
-            x_min = bbox[0]
-            y_min = bbox[1]
-            x_max = bbox[0] + bbox[2]
-            y_max = bbox[1] + bbox[3]
-            converted_bboxes.append([x_min, y_min, x_max, y_max])
-        return converted_bboxes
-
-
-def collate_fn(batch: List[Tuple[torch.Tensor, Dict]]) -> Tuple[List[torch.Tensor], List[Dict]]:
-    """
-    Custom collate function to handle batching of images and annotations.
-    Ensures that each batch is compatible with HuggingFace models.
-
-    Args:
-        batch (List[Tuple[torch.Tensor, Dict]]): List of tuples containing images and targets.
-
-    Returns:
-        Tuple[List[torch.Tensor], List[Dict]]: Batched images and targets.
-    """
-    images, targets = zip(*batch)
-    images = list(images)
-    targets = list(targets)
-    return images, targets
-
-
-def validate_data_paths(data_dir: str, ann_file: str, img_dir: str) -> None:
-    """
-    Validates that the required data paths exist.
-
-    Args:
-        data_dir (str): Path to the dataset directory.
-        ann_file (str): Path to the annotation file.
-        img_dir (str): Path to the images directory.
-
-    Raises:
-        FileNotFoundError: If any of the data paths do not exist.
-    """
-    if not os.path.isdir(data_dir):
-        raise FileNotFoundError(f"Dataset directory '{data_dir}' not found.")
-    if not os.path.exists(ann_file):
-        raise FileNotFoundError(f"Annotation file '{ann_file}' not found.")
-    if not os.path.exists(img_dir):
-        raise FileNotFoundError(f"Image directory '{img_dir}' not found.")
-    logging.info(f"Validated data paths for '{img_dir}' and '{ann_file}'.")
-
-
-def get_dataset(
-    dataset_type: str,
-    data_dir: str,
-    mode: str,
-    transforms: Optional[DataAugmentor] = None,
-    feature_extractor: Optional[Callable] = None,
-    skip_empty_check: bool = False  # New argument
-) -> Dataset:
-    """
-    Returns the appropriate dataset based on the dataset type.
-
-    Args:
-        dataset_type (str): The type of dataset (e.g., 'coco').
-        data_dir (str): Path to the dataset directory.
-        mode (str): Mode of the dataset ('train' or 'val').
-        transforms (DataAugmentor, optional): DataAugmentor instance for applying augmentations.
-        feature_extractor (Callable, optional): Feature extractor to preprocess images.
-        skip_empty_check (bool): Whether to skip checking if the dataset is empty.
-
-    Returns:
-        Dataset: A dataset object.
-
-    Raises:
-        ValueError: If the dataset type is unsupported or the dataset is empty (when not skipped).
-    """
-    if dataset_type == 'coco':
-        ann_file = os.path.join(data_dir, f'annotations/instances_{mode}2017.json')
-        img_dir = os.path.join(data_dir, f'{mode}2017')
-
-        # Validate paths
-        validate_data_paths(data_dir, ann_file, img_dir)
-
-        dataset = CocoDataset(
-            img_dir=img_dir,
-            ann_file=ann_file,
-            transforms=transforms,
-            feature_extractor=feature_extractor
+        # Use the processor to prepare the inputs
+        inputs = processor(
+            images=images,
+            annotations=annotations,
+            return_tensors="pt",
         )
 
-        # Skip check for test environments
-        if not skip_empty_check and len(dataset) == 0:
-            raise ValueError("Dataset is empty.")
+        # Prepare the labels
+        labels = inputs.pop("labels")
+        inputs["labels"] = [{k: v for k, v in label.items()} for label in labels]
 
-        return dataset
-    else:
-        raise ValueError(f"Dataset type '{dataset_type}' is not supported.")
+        return inputs
+
+    # Apply the preprocessing function to both training and validation datasets
+    for split in datasets.keys():
+        datasets[split] = datasets[split].map(
+            preprocess_function,
+            batched=True,
+            remove_columns=remove_columns or datasets[split].column_names,
+        )
+
+    return datasets
 
 
-def get_dataloader(
-    data_dir: str,
-    batch_size: int,
-    mode: str = 'train',
-    feature_extractor: Optional[Callable] = None,
-    dataset_type: str = 'coco',
-    num_workers: int = 4,
-    pin_memory: bool = True,
-    skip_empty_check: bool = False  # **Added this parameter**
-) -> DataLoader:
+def collate_fn(batch):
     """
-    Returns a DataLoader for the specified dataset.
+    Custom collate function to handle batching of images and annotations.
 
     Args:
-        data_dir (str): Path to the dataset directory.
-        batch_size (int): Number of samples per batch.
-        mode (str): Mode of the dataset, 'train' or 'val'.
-        feature_extractor (Callable, optional): Feature extractor to preprocess images.
-        dataset_type (str): The type of dataset (default is 'coco').
-        num_workers (int): Number of worker processes for data loading.
-        pin_memory (bool): Whether to pin memory in data loader.
-        skip_empty_check (bool): Whether to skip checking if the dataset is empty.
+        batch: A list of examples returned by the dataset.
 
     Returns:
-        DataLoader: DataLoader for the specified dataset.
-
-    Raises:
-        ValueError: If the dataset is empty and `skip_empty_check` is False.
+        Dict[str, Any]: A batch of data ready for the model.
     """
-    assert mode in ['train', 'val'], "Mode should be either 'train' or 'val'."
+    pixel_values = torch.stack([example["pixel_values"] for example in batch])
+    labels = [example["labels"] for example in batch]
+    return {"pixel_values": pixel_values, "labels": labels}
 
-    # Initialize DataAugmentor for training mode
-    transforms = None
-    if mode == 'train':
-        transforms = DataAugmentor(apply_geometric=True, apply_photometric=True, seed=42)
 
-    # Get dataset based on the type
-    dataset = get_dataset(
-        dataset_type=dataset_type,
-        data_dir=data_dir,
-        mode=mode,
-        transforms=transforms,
-        feature_extractor=feature_extractor,
-        skip_empty_check=skip_empty_check  # **Pass the parameter**
-    )
+def get_dataloaders(
+    datasets: DatasetDict,
+    batch_size: int,
+    num_workers: int = 4,
+) -> Dict[str, DataLoader]:
+    """
+    Creates DataLoaders for the training and validation datasets.
 
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True if mode == 'train' else False,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        collate_fn=collate_fn
-    )
+    Args:
+        datasets (DatasetDict): The datasets to create DataLoaders for.
+        batch_size (int): Batch size for data loading.
+        num_workers (int, optional): Number of worker processes.
+
+    Returns:
+        Dict[str, DataLoader]: A dictionary containing the DataLoaders for training and validation.
+    """
+    dataloaders = {}
+    for split in ["train", "validation"]:
+        dataloaders[split] = DataLoader(
+            datasets[split],
+            batch_size=batch_size,
+            shuffle=(split == "train"),
+            num_workers=num_workers,
+            collate_fn=collate_fn,
+        )
+    return dataloaders

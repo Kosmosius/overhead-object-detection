@@ -1,218 +1,130 @@
 # src/training/optimizers.py
 
-import torch
-from torch.optim import SGD, Adam, RMSprop, AdamW
-from transformers import get_scheduler, SchedulerType
-from typing import Optional, List, Dict, Any, Tuple
-from torch.optim.lr_scheduler import _LRScheduler
+from transformers import AdamW, get_scheduler, Adafactor
+from typing import Tuple, Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Define the mapping from SchedulerType to scheduler functions or string identifiers
-TYPE_TO_SCHEDULER_FUNCTION = {
-    SchedulerType.LINEAR: "linear",
-    SchedulerType.COSINE: "cosine",
-    SchedulerType.COSINE_WITH_RESTARTS: "cosine_with_restarts",
-    SchedulerType.POLYNOMIAL: "polynomial",
-    SchedulerType.CONSTANT_WITH_WARMUP: "constant_with_warmup",
-    SchedulerType.INVERSE_SQRT: "inverse_sqrt",
-    SchedulerType.WARMUP_STABLE_DECAY: "warmup_stable_decay",
-    # Add other scheduler types as needed
-}
 
 def get_optimizer(
-    model: torch.nn.Module,
-    optimizer_type: str = "adamw",
-    lr: float = 5e-5,
-    weight_decay: float = 0.01,
-    parameter_groups: Optional[List[Dict[str, Any]]] = None,
+    model,
+    optimizer_name: str = "adamw",
+    learning_rate: float = 5e-5,
+    weight_decay: float = 0.0,
     **kwargs
-) -> torch.optim.Optimizer:
+):
     """
-    Return the appropriate optimizer for the given model.
+    Creates an optimizer for the given model parameters using HuggingFace's optimizers.
 
     Args:
-        model (torch.nn.Module): The model being trained.
-        optimizer_type (str): The type of optimizer to use ('adamw', 'adam', 'sgd', or 'rmsprop').
-        lr (float): The learning rate for the optimizer.
-        weight_decay (float): Weight decay (L2 penalty) for the optimizer.
-        parameter_groups (List[Dict[str, Any]], optional):
-            Optional list of parameter groups with specific learning rates or optimizations.
-        **kwargs: Additional keyword arguments for optimizer initialization.
+        model (torch.nn.Module): The model to optimize.
+        optimizer_name (str): Name of the optimizer ('adamw', 'adafactor').
+        learning_rate (float): Learning rate for the optimizer.
+        weight_decay (float): Weight decay coefficient.
+        **kwargs: Additional keyword arguments for the optimizer.
 
     Returns:
-        torch.optim.Optimizer: The initialized optimizer.
-
-    Raises:
-        ValueError: If the optimizer type is unsupported or parameter_groups are invalid.
-        TypeError: If a parameter group contains non-Parameter elements.
+        torch.optim.Optimizer: The optimizer instance.
     """
-    optimizer_type = optimizer_type.lower()
-    optimizers = {
-        "adamw": AdamW,
-        "adam": Adam,
-        "sgd": SGD,
-        "rmsprop": RMSprop,
-    }
+    optimizer_name = optimizer_name.lower()
+    optimizer = None
 
-    if optimizer_type not in optimizers:
-        raise ValueError(
-            f"Unsupported optimizer type '{optimizer_type}'. Supported types: {list(optimizers.keys())}"
+    if optimizer_name == "adamw":
+        optimizer = AdamW(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+            **kwargs
         )
-
-    optimizer_class = optimizers[optimizer_type]
-
-    # Exclude 'lr' and 'weight_decay' from **kwargs to prevent duplication
-    excluded_keys = ['lr', 'weight_decay']
-    optimizer_kwargs = {k: v for k, v in kwargs.items() if k not in excluded_keys}
-
-    # Always set 'lr' and 'weight_decay' in optimizer_kwargs
-    optimizer_kwargs['lr'] = lr
-    optimizer_kwargs['weight_decay'] = weight_decay
-
-    if parameter_groups is not None:
-        if not isinstance(parameter_groups, list) or not all(isinstance(pg, dict) for pg in parameter_groups):
-            raise ValueError("parameter_groups must be a list of dictionaries.")
-        if len(parameter_groups) == 0:
-            raise ValueError("parameter_groups cannot be an empty list.")
-
-        # Ensure no overlapping parameters across groups
-        seen_params = set()
-        for group in parameter_groups:
-            if 'params' not in group:
-                raise ValueError("Each parameter group must have a 'params' list.")
-            params = group["params"]
-            if not isinstance(params, list):
-                raise ValueError("Each parameter group must have a 'params' list.")
-            for param in params:
-                if param in seen_params:
-                    raise ValueError("Some parameters appear in more than one parameter group.")
-                if not isinstance(param, torch.nn.Parameter):
-                    raise TypeError(
-                        "optimizer can only optimize Tensors, "
-                        f"but one of the params is {type(param).__name__}"
-                    )
-                seen_params.add(param)
-
-        params = parameter_groups
+        logger.info("Using AdamW optimizer.")
+    elif optimizer_name == "adafactor":
+        optimizer = Adafactor(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+            scale_parameter=False,
+            relative_step=False,
+            **kwargs
+        )
+        logger.info("Using Adafactor optimizer.")
     else:
-        if lr <= 0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if weight_decay < 0:
-            raise ValueError(f"Invalid weight_decay: {weight_decay}")
-        params = model.parameters()
-
-    try:
-        optimizer = optimizer_class(params, **optimizer_kwargs)
-    except TypeError as e:
-        raise TypeError(f"Error initializing optimizer '{optimizer_type}': {e}")
+        raise ValueError(f"Unsupported optimizer name '{optimizer_name}'.")
 
     return optimizer
 
-def configure_optimizer(model: torch.nn.Module, config: Dict[str, Any]) -> torch.optim.Optimizer:
+
+def get_scheduler(
+    optimizer,
+    scheduler_name: str,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    **kwargs
+):
     """
-    Configure the optimizer from a configuration file.
+    Creates a learning rate scheduler using HuggingFace's scheduler functions.
 
     Args:
-        model (torch.nn.Module): The model being optimized.
-        config (dict): Configuration for optimizer parameters.
+        optimizer (torch.optim.Optimizer): The optimizer for which to schedule the learning rate.
+        scheduler_name (str): Name of the scheduler.
+        num_warmup_steps (int): Number of warmup steps.
+        num_training_steps (int): Total number of training steps.
+        **kwargs: Additional keyword arguments for the scheduler.
 
     Returns:
-        torch.optim.Optimizer: Configured optimizer based on the config file.
+        torch.optim.lr_scheduler._LRScheduler: The scheduler instance.
     """
-    return get_optimizer(
-        model=model,
-        optimizer_type=config.get("optimizer_type", "adamw"),
-        lr=config.get("lr", 5e-5),
-        weight_decay=config.get("weight_decay", 0.01),
-        parameter_groups=config.get("parameter_groups", None)
-    )
-
-def configure_scheduler(
-    optimizer: torch.optim.Optimizer,
-    num_training_steps: Optional[int],
-    config: Dict[str, Any]
-) -> Optional[_LRScheduler]:
-    """
-    Configure the scheduler from a configuration file.
-
-    Args:
-        optimizer (torch.optim.Optimizer): The optimizer for which the scheduler is being configured.
-        num_training_steps (int): The total number of training steps.
-        config (dict): Configuration for scheduler parameters.
-
-    Returns:
-        Optional[_LRScheduler]: Configured scheduler or None if not applicable.
-    """
-    scheduler_type = config.get("scheduler_type", "linear")
-    if scheduler_type is None:
-        logger.info("No scheduler configured.")
-        return None
-
-    num_warmup_steps = config.get("num_warmup_steps", 0)
-    # Exclude scheduler-related and optimizer-related keys
-    excluded_keys = [
-        "scheduler_type",
-        "num_warmup_steps",
-        "num_training_steps",
-        "optimizer_type",
-        "lr",
-        "weight_decay",
-        "parameter_groups"
-    ]
-    scheduler_specific_kwargs = {
-        k: v for k, v in config.items() if k not in excluded_keys
-    }
-
-    try:
-        schedule_type = SchedulerType(scheduler_type)
-    except ValueError:
-        raise ValueError(f"Unsupported scheduler type '{scheduler_type}'.")
-
-    schedulers_requiring_steps = {
-        SchedulerType.LINEAR,
-        SchedulerType.COSINE,
-        SchedulerType.POLYNOMIAL,
-        SchedulerType.CONSTANT_WITH_WARMUP,
-        SchedulerType.INVERSE_SQRT,
-        SchedulerType.WARMUP_STABLE_DECAY,
-        SchedulerType.COSINE_WITH_RESTARTS,
-    }
-
-    if schedule_type in schedulers_requiring_steps and num_training_steps is None:
-        raise ValueError(f"{scheduler_type} requires `num_training_steps`, please provide that argument.")
-
-    schedule_func = TYPE_TO_SCHEDULER_FUNCTION.get(schedule_type, None)
-    if schedule_func is None:
-        raise ValueError(f"Unsupported scheduler type '{scheduler_type}'.")
-
-    return get_scheduler(
-        name=scheduler_type,
+    scheduler = get_scheduler(
+        name=scheduler_name,
         optimizer=optimizer,
         num_warmup_steps=num_warmup_steps,
         num_training_steps=num_training_steps,
-        **scheduler_specific_kwargs
+        **kwargs
     )
+    logger.info(f"Using {scheduler_name} scheduler.")
+    return scheduler
+
 
 def get_optimizer_and_scheduler(
-    model: torch.nn.Module,
-    config: Dict[str, Any],
-    num_training_steps: int
-) -> Tuple[torch.optim.Optimizer, Optional[_LRScheduler]]:
+    model,
+    optimizer_name: str,
+    scheduler_name: str,
+    learning_rate: float,
+    weight_decay: float,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    **kwargs
+) -> Tuple:
     """
-    Return both optimizer and scheduler based on the provided configuration.
+    Creates both optimizer and scheduler.
 
     Args:
-        model (torch.nn.Module): The model being trained.
-        config (dict): Configuration containing optimizer and scheduler details.
-        num_training_steps (int): The number of training steps.
+        model (torch.nn.Module): The model to optimize.
+        optimizer_name (str): Name of the optimizer.
+        scheduler_name (str): Name of the scheduler.
+        learning_rate (float): Learning rate for the optimizer.
+        weight_decay (float): Weight decay coefficient.
+        num_warmup_steps (int): Number of warmup steps for the scheduler.
+        num_training_steps (int): Total number of training steps.
+        **kwargs: Additional keyword arguments.
 
     Returns:
-        Tuple[torch.optim.Optimizer, Optional[_LRScheduler]]: 
-            Optimizer and scheduler objects.
+        Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]: The optimizer and scheduler instances.
     """
-    optimizer = configure_optimizer(model, config)
-    scheduler = configure_scheduler(optimizer, num_training_steps, config)
+    optimizer = get_optimizer(
+        model,
+        optimizer_name=optimizer_name,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        **kwargs
+    )
+
+    scheduler = get_scheduler(
+        optimizer,
+        scheduler_name=scheduler_name,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        **kwargs
+    )
 
     return optimizer, scheduler

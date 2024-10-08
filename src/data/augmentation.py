@@ -1,100 +1,182 @@
 # src/data/augmentation.py
 
-import random
+import numpy as np
+import logging
+from typing import Optional, Dict, Any, List
+
 import albumentations as A
-from albumentations.pytorch import ToTensorV2
-from typing import Dict, List, Tuple, Any
+from albumentations.pytorch.transforms import ToTensorV2
+from transformers import AutoImageProcessor
+from datasets import Dataset
 
-class DataAugmentor:
+logger = logging.getLogger(__name__)
+
+
+class DataAugmentation:
     """
-    Class to apply data augmentation for object detection tasks.
-    This includes geometric and photometric transformations applied
-    to both images and bounding boxes.
+    Class to apply data augmentation for object detection tasks using Albumentations.
+    Integrates with HuggingFace's AutoImageProcessor and datasets library, optimized for rare object detection.
     """
 
-    def __init__(self, apply_geometric=True, apply_photometric=True, seed=None):
+    def __init__(
+        self,
+        model_name_or_path: str,
+        bbox_format: str = 'coco',  # 'coco' or 'pascal_voc'
+        min_visibility: float = 0.5,
+        augmentation_transforms: Optional[A.Compose] = None,
+    ):
         """
-        Initialize the DataAugmentor class with options to apply geometric and photometric transforms.
+        Initializes the DataAugmentation class.
 
         Args:
-            apply_geometric (bool): Whether to apply geometric transformations.
-            apply_photometric (bool): Whether to apply photometric transformations.
-            seed (int, optional): Seed for reproducibility.
+            model_name_or_path (str): Path to the pretrained model or model identifier from HuggingFace.
+            bbox_format (str): Format of the bounding boxes ('coco' or 'pascal_voc').
+            min_visibility (float): Minimum visibility of bounding boxes after augmentation.
+            augmentation_transforms (A.Compose, optional): Custom augmentation transforms to apply.
+                If None, default transforms optimized for rare object detection will be used.
         """
-        self.apply_geometric = apply_geometric
-        self.apply_photometric = apply_photometric
-        self.seed = seed
-        if seed is not None:
-            random.seed(seed)
-        self.transform = self._get_transforms()
+        # Load the processor corresponding to the model
+        self.processor = AutoImageProcessor.from_pretrained(model_name_or_path)
+        self.bbox_format = bbox_format
+        self.min_visibility = min_visibility
 
-    def _get_transforms(self):
+        # Define default augmentation transforms if none provided
+        if augmentation_transforms is None:
+            self.augmentation_transforms = self.default_transforms()
+        else:
+            self.augmentation_transforms = augmentation_transforms
+
+        logger.info(f"DataAugmentation initialized for model '{model_name_or_path}' with bbox format '{bbox_format}'.")
+
+    def default_transforms(self) -> A.Compose:
         """
-        Create the transformation pipeline using Albumentations.
+        Defines the default augmentation transforms using Albumentations.
+        These transforms are optimized for rare object detection by focusing on augmentations
+        that preserve rare object instances and enhance their visibility.
 
         Returns:
-            A.Compose: Composed transformations.
+            A.Compose: Composed Albumentations transforms.
         """
-        transforms = []
-
-        if self.apply_geometric:
-            transforms.extend([
+        return A.Compose(
+            [
+                # Geometric Transformations
                 A.HorizontalFlip(p=0.5),
-                A.RandomRotate90(p=0.5),
+                A.VerticalFlip(p=0.1),
+                A.RandomRotate90(p=0.2),
                 A.ShiftScaleRotate(
                     shift_limit=0.0625,
                     scale_limit=0.1,
-                    rotate_limit=10,
-                    interpolation=1,
+                    rotate_limit=15,
+                    p=0.5,
                     border_mode=0,
-                    value=(0, 0, 0),
-                    p=0.5
                 ),
-            ])
-
-        if self.apply_photometric:
-            transforms.extend([
-                A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
-                A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10, p=0.5),
-            ])
-
-        # Always convert images to tensor
-        transforms.append(ToTensorV2())
-
-        return A.Compose(
-            transforms,
+                A.RandomResizedCrop(
+                    height=512,
+                    width=512,
+                    scale=(0.8, 1.0),
+                    ratio=(0.9, 1.1),
+                    p=0.5,
+                ),
+                # Photometric Transformations
+                A.ColorJitter(
+                    brightness=0.2,
+                    contrast=0.2,
+                    saturation=0.2,
+                    hue=0.1,
+                    p=0.5,
+                ),
+                A.GaussianBlur(blur_limit=(3, 5), p=0.3),
+                A.MotionBlur(blur_limit=3, p=0.2),
+                A.ToGray(p=0.1),
+                # Noise Injection
+                A.GaussNoise(var_limit=(10.0, 50.0), p=0.3),
+                # Cutout
+                A.Cutout(
+                    num_holes=8,
+                    max_h_size=32,
+                    max_w_size=32,
+                    fill_value=0,
+                    p=0.5,
+                ),
+                # Convert image to tensor
+                ToTensorV2(),
+            ],
             bbox_params=A.BboxParams(
-                format='pascal_voc',  # or 'coco' depending on your bbox format
+                format=self.bbox_format,
                 label_fields=['category_ids'],
-                min_area=0,
-                min_visibility=0.5
-            )
+                min_visibility=self.min_visibility,
+                filter_lost_elements=True,
+            ),
         )
 
-    def apply_augmentation(self, image, bboxes, category_ids):
+    def __call__(self, examples: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Apply augmentation to the image and bounding boxes.
+        Applies augmentation to a batch of examples.
 
         Args:
-            image (numpy.ndarray): The input image as a NumPy array.
-            bboxes (List[List[float]]): List of bounding boxes [x_min, y_min, x_max, y_max].
-            category_ids (List[int]): List of category IDs corresponding to each bounding box.
+            examples (Dict[str, Any]): A batch of examples containing 'image' and 'annotations'.
 
         Returns:
-            Dict[str, Any]: Dictionary containing the augmented image, bounding boxes, and category IDs.
+            Dict[str, Any]: The augmented batch of examples.
         """
-        # Set random seed for reproducibility if seed is provided
-        if self.seed is not None:
-            random.seed(self.seed)
+        images = examples['image']
+        annotations = examples.get('annotations', [])
 
-        augmented = self.transform(
-            image=image,
-            bboxes=bboxes,
-            category_ids=category_ids
+        augmented_images = []
+        augmented_annotations = []
+
+        for idx, (image, annotation) in enumerate(zip(images, annotations)):
+            image_np = np.array(image.convert("RGB"))
+
+            # Extract bounding boxes and category IDs
+            bboxes = [obj['bbox'] for obj in annotation['objects']]
+            category_ids = [obj['category_id'] for obj in annotation['objects']]
+
+            # Handle cases where there are no bounding boxes
+            if not bboxes:
+                logger.warning(f"No bounding boxes found for image at index {idx}. Skipping augmentation.")
+                augmented_images.append(image_np)
+                augmented_annotations.append({'objects': []})
+                continue
+
+            # Apply augmentation
+            try:
+                augmented = self.augmentation_transforms(
+                    image=image_np,
+                    bboxes=bboxes,
+                    category_ids=category_ids,
+                )
+            except Exception as e:
+                logger.error(f"Augmentation failed for image at index {idx}: {e}")
+                augmented_images.append(image_np)
+                augmented_annotations.append(annotation)
+                continue
+
+            # Check if any bounding boxes remain after augmentation
+            if not augmented['bboxes']:
+                logger.warning(f"All bounding boxes are lost after augmentation for image at index {idx}.")
+                # Optionally, skip this image or keep the original
+                augmented_images.append(image_np)
+                augmented_annotations.append(annotation)
+                continue
+
+            augmented_images.append(augmented['image'])
+
+            # Reconstruct annotations after augmentation
+            augmented_objects = [
+                {'bbox': bbox, 'category_id': category_id}
+                for bbox, category_id in zip(augmented['bboxes'], augmented['category_ids'])
+            ]
+            augmented_annotations.append({'objects': augmented_objects})
+
+        # Use the processor to prepare the inputs for the model
+        inputs = self.processor(
+            images=augmented_images,
+            annotations=augmented_annotations,
+            return_tensors="pt",
         )
 
-        return {
-            'image': augmented['image'],
-            'bboxes': augmented['bboxes'],
-            'category_ids': augmented['category_ids']
-        }
+        # Update examples with processed inputs
+        examples.update(inputs)
+
+        return examples
